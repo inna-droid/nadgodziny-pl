@@ -34,12 +34,14 @@
       overtime: gr(Number(p.overtimePay) || 0),
       premia: gr(Number(p.premia) || 0),
       vacation: gr(Number(p.vacationVariable) || 0),
+      absence: gr(Number(p.absencePay) || 0), // np. siła wyższa 50%
       sickPay: gr(Number(p.sickPay) || 0), // wynagrodzenie chorobowe (pracodawca)
       benefit: gr(Number(p.benefit) || 0), // zasiłek chorobowy
+      maternity: gr(Number(p.maternity) || 0), // zasiłek macierzyński (urlop ojcowski)
     };
     // Składki społeczne tylko od wynagrodzenia za pracę (bez chorobowego i zasiłku)
-    const work = gr(parts.salary + parts.akord + parts.topUp + parts.overtime + parts.premia + parts.vacation);
-    const gross = gr(work + parts.sickPay + parts.benefit);
+    const work = gr(parts.salary + parts.akord + parts.topUp + parts.overtime + parts.premia + parts.vacation + parts.absence);
+    const gross = gr(work + parts.sickPay + parts.benefit + parts.maternity);
     const pension = gr(work * R.pension);
     const disability = gr(work * R.disability);
     const sickness = gr(work * R.sickness);
@@ -55,10 +57,10 @@
     const kup = employment > 0 ? Math.min(Number(p.kup) || 250, employment) : 0;
     let taxBase, pit;
     if (p.age === "under26") {
-      // ulga dla młodych obejmuje pracę i chorobowe od pracodawcy, ale nie zasiłek
+      // ulga dla młodych obejmuje pracę, chorobowe od pracodawcy i zasiłek macierzyński, ale nie zasiłek chorobowy
       taxBase = Math.max(0, zl(parts.benefit));
     } else {
-      taxBase = Math.max(0, zl(employment - kup + parts.benefit + ppkEr));
+      taxBase = Math.max(0, zl(employment - kup + parts.benefit + parts.maternity + ppkEr));
     }
     pit = taxBase ? Math.max(0, zl(taxBase * R.pit - (p.pit2 ? R.pit2 : 0))) : 0;
 

@@ -305,7 +305,10 @@
 
   function monthInfo(key) {
     return Object.assign(
-      { premia: 0, premiaMode: "gross", leaveDays: 0, sickDays: 0, sickRate: 80, akordUnits: 0, akordPrice: 0, akordAmount: 0 },
+      {
+        premia: 0, premiaMode: "gross", leaveDays: 0, sickDays: 0, sickRate: 80, akordUnits: 0, akordPrice: 0, akordAmount: 0,
+        demandDays: 0, childDays: 0, occDays: 0, forceDays: 0, careDays: 0, unpaidDays: 0, paternityDays: 0,
+      },
       state.monthData[key] || {}
     );
   }
@@ -374,18 +377,41 @@
     return vals.length ? roundGr(vals.reduce((a, v) => a + v, 0) / vals.length) : Payroll.MIN_WAGE * etatNow;
   }
 
-  /** Składniki zmienne do urlopu: nadgodziny z 3 poprzednich miesięcy / godziny przepracowane. */
-  function vacationFor(key) {
-    const info = monthInfo(key);
-    const hours = (Number(info.leaveDays) || 0) * LEAVE_DAY_HOURS;
-    if (!hours) return { rate: 0, amount: 0, hours: 0 };
+  /** Rodzaje urlopów: pay — full (jak urlop), half (50%), none (bezpłatny), zus (zasiłek). */
+  const LEAVES = [
+    { key: "leaveDays", name: "Urlop wypoczynkowy", pay: "full" },
+    { key: "demandDays", name: "Urlop na żądanie", pay: "full", limit: 4 },
+    { key: "childDays", name: "Opieka nad dzieckiem do 14 lat", pay: "full", limit: 2 },
+    { key: "occDays", name: "Urlop okolicznościowy", pay: "full" },
+    { key: "forceDays", name: "Siła wyższa (50%)", pay: "half", limit: 2 },
+    { key: "careDays", name: "Urlop opiekuńczy (bezpłatny)", pay: "none", limit: 5 },
+    { key: "unpaidDays", name: "Urlop bezpłatny", pay: "none" },
+    { key: "paternityDays", name: "Urlop ojcowski (zasiłek ZUS)", pay: "zus", limit: 14 },
+  ];
+  const dayHours = () => LEAVE_DAY_HOURS * etatNow;
+
+  function leaveHours(key, payKind) {
+    const i = monthInfo(key);
+    return LEAVES.filter((l) => l.pay === payKind).reduce((a, l) => a + (Number(i[l.key]) || 0), 0) * dayHours();
+  }
+
+  /** Stawka godzinowa składników zmiennych ze średniej 3 miesięcy (godziny faktycznie przepracowane). */
+  function variableRate(key) {
     const history = [1, 2, 3].map((i) => {
       const k = shiftMonth(key, -i);
       const ot = overtimeFor(k);
-      const leaveH = (Number(monthInfo(k).leaveDays) || 0) * LEAVE_DAY_HOURS;
-      return { variable: ot.pay + (isAkord() ? akordFor(k) : 0), hoursWorked: Math.max(0, ot.nominal - leaveH) + ot.hours };
+      const absentH = leaveHours(k, "full") + leaveHours(k, "half") + leaveHours(k, "none") + (Number(monthInfo(k).sickDays) || 0) * dayHours() * (5 / 7);
+      return { variable: ot.pay + (isAkord() ? akordFor(k) : 0), hoursWorked: Math.max(0, ot.nominal - absentH) + ot.hours };
     });
-    return { ...Payroll.vacationVariable(history, hours), hours };
+    return Payroll.vacationVariable(history, 1).rate;
+  }
+
+  /** Urlopy płatne jak wypoczynkowy: pensja bez zmian + składniki zmienne ze średniej. */
+  function vacationFor(key) {
+    const hours = leaveHours(key, "full");
+    if (!hours) return { rate: 0, amount: 0, hours: 0 };
+    const rate = variableRate(key);
+    return { rate, amount: roundGr(rate * hours), hours };
   }
 
   /** Wszystkie składniki miesiąca do listy płac (umowa o pracę). */
@@ -394,34 +420,47 @@
     const ot = overtimeFor(key);
     const vac = vacationFor(key);
     const sick = sickFor(key);
-    let salary = 0, akord = 0, topUp = 0, salaryCut = 0;
+    const info = monthInfo(key);
+    const forceH = leaveHours(key, "half");
+    const unpaidH = leaveHours(key, "none");
+    const patDays = Math.min(daysInMonth(key), Number(info.paternityDays) || 0);
+    let salary = 0, akord = 0, topUp = 0, salaryCut = 0, absenceCut = 0, absencePay = 0;
+    const nominal = ot.nominal || 1;
     if (isAkord()) {
       akord = akordFor(key);
+      if (forceH) absencePay = roundGr(0.5 * variableRate(key) * forceH);
       // wyrównanie do płacy minimalnej za czas przepracowany (bez nadgodzin)
-      const worked = Math.max(0, 1 - sick.days / 30);
+      const worked = Math.max(0, 1 - (sick.days + patDays) / 30 - (unpaidH + forceH) / nominal);
       const minimum = roundGr(Payroll.MIN_WAGE * etatNow * worked);
       topUp = Math.max(0, roundGr(minimum - akord - (Number(premiaGross) || 0) - vac.amount));
     } else {
       salary = Number(state.salary) || 0;
-      if (sick.days) {
-        salaryCut = sick.days >= daysInMonth(key) ? salary : roundGr((salary / 30) * sick.days);
-        salary = roundGr(salary - salaryCut);
-      }
+      const calDays = sick.days + patDays; // L4 i ojcowski: 1/30 za dzień kalendarzowy
+      if (calDays) salaryCut = calDays >= daysInMonth(key) ? salary : roundGr((salary / 30) * calDays);
+      const hourly = salary / nominal; // bezpłatny, opiekuńczy, siła wyższa: stawka × godziny
+      if (unpaidH + forceH) absenceCut = roundGr(hourly * (unpaidH + forceH));
+      if (forceH) absencePay = roundGr(0.5 * (hourly + variableRate(key)) * forceH);
+      salary = Math.max(0, roundGr(salary - salaryCut - absenceCut));
     }
+    const maternity = patDays
+      ? roundGr(Payroll.sickDaily(Number(state.pay.sickBase) || (isAkord() ? avgAkord(key) : state.salary), etatNow, 100).daily * patDays)
+      : 0;
     return {
       params: {
         salary, akord, topUp,
         overtimePay: ot.pay,
         premia: premiaGross,
         vacationVariable: vac.amount,
+        absencePay,
         sickPay: sick.sickPay,
         benefit: sick.benefit,
+        maternity,
         age: tx.status === "26plus" ? "26plus" : "under26",
         kup: Number(tx.kup) || 250,
         pit2: tx.pit2,
         ppk: { on: tx.ppkOn, emp: tx.ppkEmp, er: tx.ppkEr },
       },
-      ot, vac, sick, salaryCut,
+      ot, vac, sick, salaryCut, absenceCut, absencePay, forceH, unpaidH, patDays, maternity,
     };
   }
 
@@ -450,13 +489,18 @@
 
   function payslipFor(key) {
     const m = monthParams(key, premiaGrossFor(key));
-    return { slip: Payroll.payslip(m.params), vac: m.vac, sick: m.sick, ot: m.ot, salaryCut: m.salaryCut };
+    return { slip: Payroll.payslip(m.params), ...m };
   }
 
-  function leaveUsedInYear(year) {
+  function usedInYear(year, field) {
     return Object.entries(state.monthData)
       .filter(([k]) => k.startsWith(`${year}-`))
-      .reduce((s, [, v]) => s + (Number(v.leaveDays) || 0), 0);
+      .reduce((s, [, v]) => s + (Number(v[field]) || 0), 0);
+  }
+
+  /** Wypoczynkowy razem z „na żądanie” (to część urlopu wypoczynkowego). */
+  function leaveUsedInYear(year) {
+    return usedInYear(year, "leaveDays") + usedInYear(year, "demandDays");
   }
 
   const CONTRACT_NAMES = { uop: "Umowa o pracę", uz: "Umowa zlecenie", b2b: "B2B (działalność gospodarcza)" };
@@ -564,7 +608,8 @@
       return;
     }
     document.getElementById("payslipTitle").textContent = "Lista płac — od brutto do netto";
-    const { slip, vac, sick, salaryCut } = payslipFor(state.month);
+    const P_ = payslipFor(state.month);
+    const { slip, vac, sick, salaryCut } = P_;
     const tx = state.tax;
     els.netPay.textContent = formatMoney(slip.net);
     els.grossPay.textContent = formatMoney(slip.gross);
@@ -587,11 +632,16 @@
       lines.push(row(Number(mi.akordAmount) > 0 ? "Zarobek z akordu" : `Akord (${formatHours(Number(mi.akordUnits) || 0)} szt. × ${formatMoney(Number(mi.akordPrice) || 0)})`, formatMoney(slip.akord)));
       if (slip.topUp) lines.push(row("+ Wyrównanie do płacy minimalnej", formatMoney(slip.topUp), "plus"));
     } else {
-      lines.push(row(salaryCut ? `Pensja zasadnicza (−${formatMoney(salaryCut)} za ${formatHours(sick.days)} dni L4)` : "Pensja zasadnicza", formatMoney(slip.salary)));
+      const cuts = [];
+      if (salaryCut) cuts.push(`−${formatMoney(salaryCut)} za ${formatHours(sick.days + P_.patDays)} dni L4/ojcowskiego`);
+      if (P_.absenceCut) cuts.push(`−${formatMoney(P_.absenceCut)} za ${formatHours(P_.unpaidH + P_.forceH)} h nieobecności`);
+      lines.push(row(cuts.length ? `Pensja zasadnicza (${cuts.join(", ")})` : "Pensja zasadnicza", formatMoney(slip.salary)));
     }
     if (slip.overtime) lines.push(row(isAkord() ? "+ Dodatki za nadgodziny (50% / 100%)" : "+ Nadgodziny (z dodatkami)", formatMoney(slip.overtime), "plus"));
     if (slip.premia) lines.push(row("+ Premia uznaniowa", formatMoney(slip.premia), "plus"));
     if (slip.vacation) lines.push(row(`+ Urlop — składniki zmienne (${formatHours(vac.hours)} h × ${formatMoney(vac.rate)})`, formatMoney(slip.vacation), "plus"));
+    if (slip.absence) lines.push(row(`+ Siła wyższa — 50% wynagrodzenia (${formatHours(P_.forceH)} h)`, formatMoney(slip.absence), "plus"));
+    if (slip.maternity) lines.push(row(`+ Zasiłek macierzyński — urlop ojcowski 100% (${formatHours(P_.patDays)} dni)`, formatMoney(slip.maternity), "plus"));
     if (slip.sickPay) lines.push(row(`+ Wynagrodzenie chorobowe ${sick.rate}% (${formatHours(sick.empDays)} dni × ${formatMoney(sick.daily)})`, formatMoney(slip.sickPay), "plus"));
     if (slip.benefit) lines.push(row(`+ Zasiłek chorobowy ZUS ${sick.rate}% (${formatHours(sick.benDays)} dni × ${formatMoney(sick.daily)})`, formatMoney(slip.benefit), "plus"));
     lines.push(row("= Brutto", formatMoney(slip.gross), "sum"));
@@ -637,12 +687,24 @@
       parts.push("Od chorobowego nie ma składek ZUS, jest zdrowotna i podatek; od zasiłku tylko podatek.");
       sInfo.textContent = parts.join(" ");
     } else sInfo.hidden = true;
-    els.leaveDays.value = info.leaveDays || "";
-    els.leaveInfo.textContent = info.leaveDays
-      ? `Urlop: ${formatHours(Number(info.leaveDays))} dni (${formatHours(vac.hours)} h). Pensja zasadnicza bez zmian` +
-        (vac.amount ? ` + ${formatMoney(vac.amount)} za nadgodziny ze średniej 3 miesięcy.` : ". Brak nadgodzin w 3 poprzednich miesiącach — nic nie dochodzi.") +
-        ` W ${year} r. wykorzystane: ${formatHours(used)} z ${limit} dni.`
-      : `W ${year} r. wykorzystane: ${formatHours(used)} z ${limit} dni urlopu. Premia uznaniowa nie wchodzi do wynagrodzenia urlopowego.`;
+    LEAVES.forEach((l) => (document.getElementById(l.key).value = info[l.key] || ""));
+    const rowsY = [
+      ["Wypoczynkowy (z „na żądanie”)", used, limit],
+      ["— w tym na żądanie", usedInYear(year, "demandDays"), 4],
+      ["Opieka nad dzieckiem do 14 lat", usedInYear(year, "childDays"), 2],
+      ["Siła wyższa (50%)", usedInYear(year, "forceDays"), 2],
+      ["Opiekuńczy (bezpłatny)", usedInYear(year, "careDays"), 5],
+      ["Ojcowski (dni)", usedInYear(year, "paternityDays"), 14],
+      ["Okolicznościowy", usedInYear(year, "occDays"), null],
+      ["Bezpłatny", usedInYear(year, "unpaidDays"), null],
+      ["L4 (dni)", usedInYear(year, "sickDays"), state.pay.age50 ? 14 : 33],
+    ];
+    const note = vac.hours
+      ? `Urlop płatny jak wypoczynkowy: ${formatHours(vac.hours)} h — pensja bez zmian${vac.amount ? ` + ${formatMoney(vac.amount)} ze średniej nadgodzin (3 miesiące)` : ""}. `
+      : "";
+    els.leaveInfo.innerHTML = `<p style="margin:0">${escapeHtml(note)}Wykorzystane w ${year} r.:</p><table>${rowsY
+      .map(([n, u, lim]) => `<tr><td>${escapeHtml(n)}</td><td class="${lim != null && u > lim ? "over" : ""}">${formatHours(u)}${lim != null ? ` / ${lim}` : ""}</td></tr>`)
+      .join("")}</table>`;
   }
 
   function renderContractInputs() {
@@ -1003,16 +1065,19 @@
   /** Wiersze listy płac do wydruku i CSV: [etykieta, kwota, znak] */
   function payslipLines() {
     if (state.contract !== "uop") return contractLines().L;
-    const { slip, vac, sick, salaryCut } = payslipFor(state.month);
+    const P_ = payslipFor(state.month);
+    const { slip, vac, sick, salaryCut } = P_;
     const tx = state.tax;
     const L = [];
     if (isAkord()) {
       L.push(["Zarobek z akordu", slip.akord, ""]);
       if (slip.topUp) L.push(["Wyrównanie do płacy minimalnej", slip.topUp, "+"]);
-    } else L.push([salaryCut ? `Pensja zasadnicza (po potrąceniu ${formatHours(sick.days)} dni L4)` : "Pensja zasadnicza", slip.salary, ""]);
+    } else L.push([salaryCut || P_.absenceCut ? "Pensja zasadnicza (po potrąceniach za nieobecności)" : "Pensja zasadnicza", slip.salary, ""]);
     if (slip.overtime) L.push([isAkord() ? "Dodatki za nadgodziny (50% / 100%)" : "Nadgodziny (z dodatkami)", slip.overtime, "+"]);
     if (slip.premia) L.push(["Premia uznaniowa", slip.premia, "+"]);
     if (slip.vacation) L.push([`Urlop — składniki zmienne (${formatHours(vac.hours)} h)`, slip.vacation, "+"]);
+    if (slip.absence) L.push([`Siła wyższa — 50% (${formatHours(P_.forceH)} h)`, slip.absence, "+"]);
+    if (slip.maternity) L.push([`Zasiłek macierzyński — urlop ojcowski (${formatHours(P_.patDays)} dni)`, slip.maternity, "+"]);
     if (slip.sickPay) L.push([`Wynagrodzenie chorobowe ${sick.rate}% (${formatHours(sick.empDays)} dni)`, slip.sickPay, "+"]);
     if (slip.benefit) L.push([`Zasiłek chorobowy ${sick.rate}% (${formatHours(sick.benDays)} dni)`, slip.benefit, "+"]);
     L.push(["Wynagrodzenie brutto", slip.gross, "="]);
@@ -1281,6 +1346,9 @@
     saveState();
     render();
   });
+  LEAVES.filter((l) => l.key !== "leaveDays").forEach((l) =>
+    document.getElementById(l.key).addEventListener("change", (e) => setMonthInfo(l.key, e.target.value))
+  );
   els.leaveDays.addEventListener("change", () => {
     const max = Number(state.tax.leaveLimit) || 26;
     setMonthInfo("leaveDays", Math.min(31, Number(els.leaveDays.value) || 0));

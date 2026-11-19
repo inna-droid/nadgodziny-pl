@@ -782,3 +782,14 @@ fieldset.contract-pick legend { font-size: 0.82rem; font-weight: 600; color: var
 
 .rate-net { display: block; margin-top: 0.2rem; font-size: 0.82rem; color: var(--ink-soft); }
 .rate-net b { color: var(--teal); }
+
+/* ---------- rodzaje urlopów ---------- */
+fieldset.leaves { border: none; padding: 0; margin: 0; }
+fieldset.leaves legend { font-size: 0.82rem; font-weight: 600; color: var(--ink-soft); margin-bottom: 0.4rem; }
+.leave-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.leave-grid label { display: grid; gap: 0.25rem; font-size: 0.8rem; font-weight: 600; color: var(--ink-soft); }
+.leave-grid small { font-weight: 500; font-size: 0.72rem; color: var(--teal-mid); }
+.leave-summary table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 0.4rem; }
+.leave-summary td { padding: 0.25rem 0; border-top: 1px solid var(--line); }
+.leave-summary td:last-child { text-align: right; font-weight: 700; white-space: nowrap; }
+.leave-summary .over { color: var(--danger); }
