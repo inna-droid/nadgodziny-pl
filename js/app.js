@@ -110,11 +110,11 @@
   }
 
   function defaultUz() {
-    return { mode: "hour", rate: 31.4, hours: 160, amount: 5000, status: "only", sickness: false, pit2: true };
+    return { mode: "hour", rate: 31.4, hours: 160, amount: 5000, units: 0, price: 0, status: "only", sickness: false, pit2: true };
   }
 
   function defaultB2b() {
-    return { revenue: 10000, costs: 0, zus: "big", form: "skala", rate: 12, sickness: false };
+    return { mode: "amount", revenue: 10000, units: 0, price: 0, costs: 0, zus: "big", form: "skala", rate: 12, sickness: false };
   }
 
   /** Godziny nominalne miesiąca z uwzględnieniem wymiaru etatu. */
@@ -505,9 +505,25 @@
 
   const CONTRACT_NAMES = { uop: "Umowa o pracę", uz: "Umowa zlecenie", b2b: "B2B (działalność gospodarcza)" };
 
+  const UZ_MIN_HOURLY = 31.4;
+  /** Zlecenie w akordzie: sztuki × stawka + wyrównanie do minimalnej stawki godzinowej. */
+  function uzAkord() {
+    const u = state.uz;
+    const pieces = roundGr((Number(u.units) || 0) * (Number(u.price) || 0));
+    const hours = Number(u.hours) || 0;
+    const topUp = hours ? Math.max(0, roundGr(UZ_MIN_HOURLY * hours - pieces)) : 0;
+    return { pieces, topUp, hours };
+  }
+
   function uzGross() {
     const u = state.uz;
+    if (u.mode === "akord") { const a = uzAkord(); return roundGr(a.pieces + a.topUp); }
     return u.mode === "hour" ? roundGr((Number(u.rate) || 0) * (Number(u.hours) || 0)) : roundGr(Number(u.amount) || 0);
+  }
+
+  function b2bRevenue() {
+    const b = state.b2b;
+    return b.mode === "akord" ? roundGr((Number(b.units) || 0) * (Number(b.price) || 0)) : Number(b.revenue) || 0;
   }
 
   function uzResult() {
@@ -517,7 +533,7 @@
 
   function b2bResult() {
     const b = state.b2b;
-    return Payroll.b2b({ revenue: b.revenue, costs: b.costs, zus: b.zus, sickness: b.sickness, form: b.form, ryczaltRate: b.rate });
+    return Payroll.b2b({ revenue: b2bRevenue(), costs: b.costs, zus: b.zus, sickness: b.sickness, form: b.form, ryczaltRate: b.rate });
   }
 
   /** Wiersze rozliczenia dla zlecenia i B2B: [etykieta, kwota, znak] */
@@ -525,14 +541,20 @@
     if (state.contract === "uz") {
       const r = uzResult();
       const u = state.uz;
-      const L = [[u.mode === "hour" ? `Wynagrodzenie (${formatHours(Number(u.hours) || 0)} h × ${formatMoney(Number(u.rate) || 0)})` : "Wynagrodzenie z umowy", r.gross, "="]];
+      const L = [];
+      if (u.mode === "akord") {
+        const a = uzAkord();
+        L.push([`Akord (${formatHours(Number(u.units) || 0)} szt. × ${formatMoney(Number(u.price) || 0)})`, a.pieces, "i"]);
+        if (a.topUp) L.push([`Wyrównanie do 31,40 zł/h (${formatHours(a.hours)} h)`, a.topUp, "i"]);
+      }
+      L.push([u.mode === "hour" ? `Wynagrodzenie (${formatHours(Number(u.hours) || 0)} h × ${formatMoney(Number(u.rate) || 0)})` : u.mode === "akord" ? "Wynagrodzenie brutto" : "Wynagrodzenie z umowy", r.gross, "="]);
       if (r.pension) L.push(["Składka emerytalna 9,76%", r.pension, "−"]);
       if (r.disability) L.push(["Składka rentowa 1,5%", r.disability, "−"]);
       if (r.sickness) L.push(["Składka chorobowa 2,45%", r.sickness, "−"]);
       if (r.health) L.push(["Składka zdrowotna 9%", r.health, "−"]);
       L.push([u.status === "etat" || u.status === "only" ? `Zaliczka PIT 12%${u.pit2 ? " (PIT-2)" : ""}` : "Zaliczka PIT — ulga dla młodych", r.pit, "−"]);
       L.push(["Do wypłaty netto", r.net, "="]);
-      const hrs = u.mode === "hour" ? Number(u.hours) || 0 : 0;
+      const hrs = u.mode !== "amount" ? Number(u.hours) || 0 : 0;
       if (hrs) {
         L.push(["Stawka za godzinę brutto", roundGr(r.gross / hrs), "i"]);
         L.push(["Stawka za godzinę netto (na rękę)", roundGr(r.net / hrs), "i"]);
@@ -544,7 +566,9 @@
     const r = b2bResult();
     const b = state.b2b;
     const formName = { skala: "skala 12%", liniowy: "liniowy 19%", ryczalt: `ryczałt ${String(b.rate).replace(".", ",")}%` }[r.form];
-    const L = [["Przychód netto (bez VAT)", r.revenue, "="]];
+    const L = [];
+    if (b.mode === "akord") L.push([`Akord (${formatHours(Number(b.units) || 0)} szt. × ${formatMoney(Number(b.price) || 0)})`, r.revenue, "i"]);
+    L.push(["Przychód netto (bez VAT)", r.revenue, "="]);
     if (r.costs) L.push([r.fp ? "Koszty firmy (z Funduszem Pracy)" : "Koszty firmy", r.costs, "−"]);
     if (r.pension) L.push(["ZUS emerytalna 19,52%", r.pension, "−"]);
     if (r.disability) L.push(["ZUS rentowa 8%", r.disability, "−"]);
@@ -566,12 +590,22 @@
     const u = state.uz;
     if (c === "uz") {
       document.getElementById("uzRateRow").hidden = u.mode !== "hour";
-      document.getElementById("uzHoursRow").hidden = u.mode !== "hour";
+      document.getElementById("uzHoursRow").hidden = u.mode === "amount";
+      document.getElementById("uzUnitsRow").hidden = u.mode !== "akord";
+      document.getElementById("uzPriceRow").hidden = u.mode !== "akord";
+      document.getElementById("uzHoursHint").hidden = u.mode !== "akord";
+      document.getElementById("uzHoursLabel").textContent = u.mode === "akord" ? "Przepracowane godziny (do sprawdzenia minimum)" : "Godziny w miesiącu";
       document.getElementById("uzAmountRow").hidden = u.mode !== "amount";
       document.getElementById("uzSickRow").hidden = !(u.status === "under26" || u.status === "only");
       document.getElementById("uzPit2Row").hidden = !(u.status === "etat" || u.status === "only");
     }
-    if (c === "b2b") document.getElementById("b2bRateRow").hidden = state.b2b.form !== "ryczalt";
+    if (c === "b2b") {
+      const b = state.b2b;
+      document.getElementById("b2bRateRow").hidden = b.form !== "ryczalt";
+      document.getElementById("b2bRevenueRow").hidden = b.mode === "akord";
+      document.getElementById("b2bUnitsRow").hidden = b.mode !== "akord";
+      document.getElementById("b2bPriceRow").hidden = b.mode !== "akord";
+    }
     els.printReport.classList.toggle("no-ot", c !== "uop");
     document.getElementById("brandSub").textContent =
       c === "uz" ? "Umowa zlecenie · netto po ZUS i podatku" : c === "b2b" ? "B2B · ile zostaje z faktury" : "Umowa o pracę · netto, nadgodziny, urlop";
@@ -597,8 +631,8 @@
       els.netPay.textContent = formatMoney(net);
       els.grossPay.textContent = formatMoney(gross);
       const u = state.uz;
-      if (state.contract === "uz" && u.mode === "hour" && Number(u.hours) > 0) {
-        els.grossPay.textContent = `${formatMoney(gross)} · ${formatMoney(Number(u.rate) || 0)}/h brutto → ${formatMoney(roundGr(net / Number(u.hours)))}/h netto`;
+      if (state.contract === "uz" && u.mode !== "amount" && Number(u.hours) > 0) {
+        els.grossPay.textContent = `${formatMoney(gross)} · ${formatMoney(roundGr(gross / Number(u.hours)))}/h brutto → ${formatMoney(roundGr(net / Number(u.hours)))}/h netto`;
       }
       document.getElementById("payslipTitle").textContent = state.contract === "uz" ? "Zlecenie — od brutto do netto" : "Firma (B2B) — od przychodu do kwoty na rękę";
       const row = (label, value, cls = "") => `<div class="${cls}"><dt>${label}</dt><dd>${value}</dd></div>`;
@@ -723,6 +757,8 @@
     val("akordUnits", mi.akordUnits || ""); val("akordPrice", mi.akordPrice || ""); val("akordAmount", mi.akordAmount || "");
     val("sickDays", mi.sickDays || ""); val("sickRate", String(mi.sickRate || 80));
     val("uzMode", u.mode); val("uzRate", u.rate); val("uzHours", u.hours); val("uzAmount", u.amount);
+    val("uzUnits", u.units || ""); val("uzPrice", u.price || "");
+    val("b2bMode", b.mode); val("b2bUnits", b.units || ""); val("b2bPrice", b.price || "");
     document.querySelectorAll("input[name=uzStatus]").forEach((r) => (r.checked = r.value === u.status));
     document.getElementById("uzSick").checked = u.sickness;
     document.getElementById("uzPit2").checked = u.pit2;
@@ -1306,6 +1342,11 @@
     else if (id === "uzRate") u.rate = num();
     else if (id === "uzHours") u.hours = num();
     else if (id === "uzAmount") u.amount = num();
+    else if (id === "uzUnits") u.units = num();
+    else if (id === "uzPrice") u.price = num();
+    else if (id === "b2bMode") b.mode = v === "akord" ? "akord" : "amount";
+    else if (id === "b2bUnits") b.units = num();
+    else if (id === "b2bPrice") b.price = num();
     else if (e.target.name === "uzStatus") u.status = v;
     else if (id === "uzSick") u.sickness = e.target.checked;
     else if (id === "uzPit2") u.pit2 = e.target.checked;
