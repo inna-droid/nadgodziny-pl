@@ -74,6 +74,7 @@
         family: Array.isArray(parsed.family) ? parsed.family : [],
         monthData: parsed.monthData && typeof parsed.monthData === "object" ? parsed.monthData : {},
         contract: ["uop", "uz", "b2b"].includes(parsed.contract) ? parsed.contract : "uop",
+        pay: Object.assign(defaultPay(), parsed.pay || {}),
         etat: Number(parsed.etat) || 1,
         uz: Object.assign(defaultUz(), parsed.uz || {}),
         b2b: Object.assign(defaultB2b(), parsed.b2b || {}),
@@ -97,10 +98,15 @@
       family: [],
       monthData: {},
       contract: "uop",
+      pay: defaultPay(),
       etat: 1,
       uz: defaultUz(),
       b2b: defaultB2b(),
     };
+  }
+
+  function defaultPay() {
+    return { type: "fixed", akordHourly: 0, sickBase: 0, age50: false };
   }
 
   function defaultUz() {
@@ -298,7 +304,10 @@
   const pct = (v) => String(Number(v) || 0).replace(".", ",");
 
   function monthInfo(key) {
-    return Object.assign({ premia: 0, premiaMode: "gross", leaveDays: 0 }, state.monthData[key] || {});
+    return Object.assign(
+      { premia: 0, premiaMode: "gross", leaveDays: 0, sickDays: 0, sickRate: 80, akordUnits: 0, akordPrice: 0, akordAmount: 0 },
+      state.monthData[key] || {}
+    );
   }
 
   function shiftMonth(key, delta) {
@@ -311,13 +320,58 @@
   function overtimeFor(key) {
     const [y, m] = key.split("-").map(Number);
     const nominal = key === state.month ? Number(state.nominalHours) || nominalAuto(y, m - 1) : nominalAuto(y, m - 1);
-    const rate = roundGr(state.salary / (nominal || 1));
     const list = state.entries.filter((e) => e.date.startsWith(key));
-    return {
-      nominal,
-      pay: roundGr(list.reduce((s, e) => s + payForEntry(e, rate), 0)),
-      hours: list.reduce((s, e) => s + e.hours, 0),
-    };
+    const hours = list.reduce((s, e) => s + e.hours, 0);
+    if (isAkord()) {
+      // Na akordzie zapłata za same godziny jest w sztukach; dochodzą tylko dodatki 50% / 100%
+      const rate = akordHourly(nominal);
+      return { nominal, rate, hours, pay: roundGr(list.reduce((s, e) => s + roundGr(e.hours * bonusRate(e, rate)), 0)) };
+    }
+    const rate = roundGr(state.salary / (nominal || 1));
+    return { nominal, rate, hours, pay: roundGr(list.reduce((s, e) => s + payForEntry(e, rate), 0)) };
+  }
+
+  const isAkord = () => state.contract === "uop" && state.pay.type === "akord";
+
+  /** Stawka do dodatków za nadgodziny na akordzie: z umowy albo z płacy minimalnej. */
+  function akordHourly(nominal) {
+    const own = Number(state.pay.akordHourly) || 0;
+    return own > 0 ? roundGr(own) : roundGr((Payroll.MIN_WAGE * etatNow) / (nominal || 1));
+  }
+
+  function akordFor(key) {
+    const i = monthInfo(key);
+    const amount = Number(i.akordAmount) || 0;
+    return amount > 0 ? roundGr(amount) : roundGr((Number(i.akordUnits) || 0) * (Number(i.akordPrice) || 0));
+  }
+
+  function daysInMonth(key) {
+    const [y, m] = key.split("-").map(Number);
+    return new Date(y, m, 0).getDate();
+  }
+
+  /** L4: dni u pracodawcy (33 / 14 w roku) i dni zasiłku z ZUS. */
+  function sickFor(key) {
+    const i = monthInfo(key);
+    const days = Math.min(daysInMonth(key), Math.max(0, Number(i.sickDays) || 0));
+    if (!days) return { days: 0, empDays: 0, benDays: 0, daily: 0, sickPay: 0, benefit: 0, base: 0, rate: 80 };
+    const year = key.slice(0, 4);
+    const usedBefore = Object.entries(state.monthData)
+      .filter(([k]) => k.startsWith(`${year}-`) && k < key)
+      .reduce((a, [, v]) => a + (Number(v.sickDays) || 0), 0);
+    const limit = state.pay.age50 ? 14 : 33;
+    const empDays = Math.min(days, Math.max(0, limit - usedBefore));
+    const benDays = days - empDays;
+    let base = Number(state.pay.sickBase) || 0;
+    if (!base) base = isAkord() ? avgAkord(key) : state.salary;
+    const rate = Number(i.sickRate) === 100 ? 100 : 80;
+    const d = Payroll.sickDaily(base, etatNow, rate);
+    return { days, empDays, benDays, base, rate, daily: d.daily, sickPay: roundGr(d.daily * empDays), benefit: roundGr(d.daily * benDays), limit, usedBefore };
+  }
+
+  function avgAkord(key) {
+    const vals = [1, 2, 3].map((n) => akordFor(shiftMonth(key, -n))).filter((v) => v > 0);
+    return vals.length ? roundGr(vals.reduce((a, v) => a + v, 0) / vals.length) : Payroll.MIN_WAGE * etatNow;
   }
 
   /** Składniki zmienne do urlopu: nadgodziny z 3 poprzednich miesięcy / godziny przepracowane. */
@@ -329,25 +383,50 @@
       const k = shiftMonth(key, -i);
       const ot = overtimeFor(k);
       const leaveH = (Number(monthInfo(k).leaveDays) || 0) * LEAVE_DAY_HOURS;
-      return { variable: ot.pay, hoursWorked: Math.max(0, ot.nominal - leaveH) + ot.hours };
+      return { variable: ot.pay + (isAkord() ? akordFor(k) : 0), hoursWorked: Math.max(0, ot.nominal - leaveH) + ot.hours };
     });
     return { ...Payroll.vacationVariable(history, hours), hours };
   }
 
-  function slipWithPremia(key, premiaGross) {
+  /** Wszystkie składniki miesiąca do listy płac (umowa o pracę). */
+  function monthParams(key, premiaGross) {
     const tx = state.tax;
     const ot = overtimeFor(key);
     const vac = vacationFor(key);
-    return Payroll.payslip({
-      salary: state.salary,
-      overtimePay: ot.pay,
-      premia: premiaGross,
-      vacationVariable: vac.amount,
-      age: tx.status === "26plus" ? "26plus" : "under26",
-      kup: Number(tx.kup) || 250,
-      pit2: tx.pit2,
-      ppk: { on: tx.ppkOn, emp: tx.ppkEmp, er: tx.ppkEr },
-    });
+    const sick = sickFor(key);
+    let salary = 0, akord = 0, topUp = 0, salaryCut = 0;
+    if (isAkord()) {
+      akord = akordFor(key);
+      // wyrównanie do płacy minimalnej za czas przepracowany (bez nadgodzin)
+      const worked = Math.max(0, 1 - sick.days / 30);
+      const minimum = roundGr(Payroll.MIN_WAGE * etatNow * worked);
+      topUp = Math.max(0, roundGr(minimum - akord - (Number(premiaGross) || 0) - vac.amount));
+    } else {
+      salary = Number(state.salary) || 0;
+      if (sick.days) {
+        salaryCut = sick.days >= daysInMonth(key) ? salary : roundGr((salary / 30) * sick.days);
+        salary = roundGr(salary - salaryCut);
+      }
+    }
+    return {
+      params: {
+        salary, akord, topUp,
+        overtimePay: ot.pay,
+        premia: premiaGross,
+        vacationVariable: vac.amount,
+        sickPay: sick.sickPay,
+        benefit: sick.benefit,
+        age: tx.status === "26plus" ? "26plus" : "under26",
+        kup: Number(tx.kup) || 250,
+        pit2: tx.pit2,
+        ppk: { on: tx.ppkOn, emp: tx.ppkEmp, er: tx.ppkEr },
+      },
+      ot, vac, sick, salaryCut,
+    };
+  }
+
+  function slipWithPremia(key, premiaGross) {
+    return Payroll.payslip(monthParams(key, premiaGross).params);
   }
 
   /** Premia brutto: wpisana, albo wyliczona z kwoty netto (ile więcej na rękę dzięki premii). */
@@ -370,20 +449,8 @@
   }
 
   function payslipFor(key) {
-    const tx = state.tax;
-    const ot = overtimeFor(key);
-    const vac = vacationFor(key);
-    const slip = Payroll.payslip({
-      salary: state.salary,
-      overtimePay: ot.pay,
-      premia: premiaGrossFor(key),
-      vacationVariable: vac.amount,
-      age: tx.status === "26plus" ? "26plus" : "under26",
-      kup: Number(tx.kup) || 250,
-      pit2: tx.pit2,
-      ppk: { on: tx.ppkOn, emp: tx.ppkEmp, er: tx.ppkEr },
-    });
-    return { slip, vac };
+    const m = monthParams(key, premiaGrossFor(key));
+    return { slip: Payroll.payslip(m.params), vac: m.vac, sick: m.sick, ot: m.ot, salaryCut: m.salaryCut };
   }
 
   function leaveUsedInYear(year) {
@@ -497,7 +564,7 @@
       return;
     }
     document.getElementById("payslipTitle").textContent = "Lista płac — od brutto do netto";
-    const { slip, vac } = payslipFor(state.month);
+    const { slip, vac, sick, salaryCut } = payslipFor(state.month);
     const tx = state.tax;
     els.netPay.textContent = formatMoney(slip.net);
     els.grossPay.textContent = formatMoney(slip.gross);
@@ -510,14 +577,23 @@
       ppk: { on: tx.ppkOn, emp: tx.ppkEmp, er: tx.ppkEr },
     }).net;
     const nominalNow = Number(state.nominalHours) || 1;
-    document.getElementById("hourlyNet").textContent = formatMoney(roundGr(baseNet / nominalNow));
+    document.getElementById("hourlyNet").textContent = isAkord() ? "—" : formatMoney(roundGr(baseNet / nominalNow));
 
     const row = (label, value, cls = "") => `<div class="${cls}"><dt>${label}</dt><dd>${value}</dd></div>`;
     const minus = (label, v) => row(label, `−${formatMoney(v)}`, "minus");
-    const lines = [row("Pensja zasadnicza", formatMoney(slip.salary))];
-    if (slip.overtime) lines.push(row("+ Nadgodziny (z dodatkami)", formatMoney(slip.overtime), "plus"));
+    const lines = [];
+    if (isAkord()) {
+      const mi = monthInfo(state.month);
+      lines.push(row(Number(mi.akordAmount) > 0 ? "Zarobek z akordu" : `Akord (${formatHours(Number(mi.akordUnits) || 0)} szt. × ${formatMoney(Number(mi.akordPrice) || 0)})`, formatMoney(slip.akord)));
+      if (slip.topUp) lines.push(row("+ Wyrównanie do płacy minimalnej", formatMoney(slip.topUp), "plus"));
+    } else {
+      lines.push(row(salaryCut ? `Pensja zasadnicza (−${formatMoney(salaryCut)} za ${formatHours(sick.days)} dni L4)` : "Pensja zasadnicza", formatMoney(slip.salary)));
+    }
+    if (slip.overtime) lines.push(row(isAkord() ? "+ Dodatki za nadgodziny (50% / 100%)" : "+ Nadgodziny (z dodatkami)", formatMoney(slip.overtime), "plus"));
     if (slip.premia) lines.push(row("+ Premia uznaniowa", formatMoney(slip.premia), "plus"));
     if (slip.vacation) lines.push(row(`+ Urlop — składniki zmienne (${formatHours(vac.hours)} h × ${formatMoney(vac.rate)})`, formatMoney(slip.vacation), "plus"));
+    if (slip.sickPay) lines.push(row(`+ Wynagrodzenie chorobowe ${sick.rate}% (${formatHours(sick.empDays)} dni × ${formatMoney(sick.daily)})`, formatMoney(slip.sickPay), "plus"));
+    if (slip.benefit) lines.push(row(`+ Zasiłek chorobowy ZUS ${sick.rate}% (${formatHours(sick.benDays)} dni × ${formatMoney(sick.daily)})`, formatMoney(slip.benefit), "plus"));
     lines.push(row("= Brutto", formatMoney(slip.gross), "sum"));
     lines.push(minus("Składka emerytalna 9,76%", slip.pension));
     lines.push(minus("Składka rentowa 1,5%", slip.disability));
@@ -551,6 +627,16 @@
       pInfo.hidden = false;
       pInfo.textContent = `Premia: ${formatMoney(slip.premia)} brutto → ${formatMoney(gain)} na rękę (po ZUS, zdrowotnej${tx.status === "26plus" ? ", podatku" : ""}${tx.ppkOn ? " i PPK" : ""}).`;
     } else pInfo.hidden = true;
+    const sInfo = document.getElementById("sickInfo");
+    if (sick.days) {
+      sInfo.hidden = false;
+      const parts = [`L4: ${formatHours(sick.days)} dni po ${formatMoney(sick.daily)} (${sick.rate}% z podstawy ${formatMoney(Math.max(sick.base, Payroll.MIN_WAGE * etatNow))}).`];
+      if (sick.empDays) parts.push(`${formatHours(sick.empDays)} dni płaci pracodawca (limit ${sick.limit} dni w roku, wcześniej wykorzystane: ${formatHours(sick.usedBefore)}).`);
+      if (sick.benDays) parts.push(`${formatHours(sick.benDays)} dni — zasiłek z ZUS (może przyjść osobnym przelewem z ZUS).`);
+      if (salaryCut) parts.push(`Pensja zmniejszona o ${formatMoney(salaryCut)} (1/30 za każdy dzień L4).`);
+      parts.push("Od chorobowego nie ma składek ZUS, jest zdrowotna i podatek; od zasiłku tylko podatek.");
+      sInfo.textContent = parts.join(" ");
+    } else sInfo.hidden = true;
     els.leaveDays.value = info.leaveDays || "";
     els.leaveInfo.textContent = info.leaveDays
       ? `Urlop: ${formatHours(Number(info.leaveDays))} dni (${formatHours(vac.hours)} h). Pensja zasadnicza bez zmian` +
@@ -563,6 +649,17 @@
     const u = state.uz, b = state.b2b;
     const val = (id, v) => (document.getElementById(id).value = v ?? "");
     val("etat", String(state.etat));
+    val("payType", state.pay.type);
+    val("akordHourly", state.pay.akordHourly || "");
+    val("sickBase", state.pay.sickBase || "");
+    document.getElementById("age50").checked = state.pay.age50;
+    const ak = isAkord();
+    document.getElementById("akordHourlyRow").hidden = !ak || state.contract !== "uop";
+    document.getElementById("salaryRow").hidden = ak || state.contract !== "uop";
+    ["akordUnitsRow", "akordPriceRow", "akordAmountRow"].forEach((id) => (document.getElementById(id).hidden = !ak));
+    const mi = monthInfo(state.month);
+    val("akordUnits", mi.akordUnits || ""); val("akordPrice", mi.akordPrice || ""); val("akordAmount", mi.akordAmount || "");
+    val("sickDays", mi.sickDays || ""); val("sickRate", String(mi.sickRate || 80));
     val("uzMode", u.mode); val("uzRate", u.rate); val("uzHours", u.hours); val("uzAmount", u.amount);
     document.querySelectorAll("input[name=uzStatus]").forEach((r) => (r.checked = r.value === u.status));
     document.getElementById("uzSick").checked = u.sickness;
@@ -616,10 +713,11 @@
     renderPayslip();
     renderTax();
     renderFamily();
-    const rate = hourlyRate();
+    const otNow = overtimeFor(state.month);
+    const rate = isAkord() ? otNow.rate : hourlyRate();
     const monthEntries = entriesForMonth();
     const totalHours = monthEntries.reduce((s, e) => s + e.hours, 0);
-    const totalPay = monthEntries.reduce((s, e) => s + payForEntry(e, rate), 0);
+    const totalPay = isAkord() ? otNow.pay : monthEntries.reduce((s, e) => s + payForEntry(e, rate), 0);
 
     els.monthLabel.textContent = monthTitle(state.month);
     els.hourlyRate.textContent = formatMoney(rate);
@@ -639,7 +737,7 @@
     els.entryList.innerHTML = monthEntries
       .map((entry) => {
         const parts = splitEntry(entry, rate);
-        const pay = parts.total;
+        const pay = isAkord() ? parts.bonus : parts.total;
         const badgeClass = entry.rate === 100 ? "weekend" : "";
         const note = entry.note ? ` · ${escapeHtml(entry.note)}` : "";
         return `
@@ -650,7 +748,7 @@
                 <span class="badge ${badgeClass}">+${entry.rate}%</span>
               </div>
               <div class="entry-meta">${formatHours(entry.hours)} h${note}</div>
-              <div class="entry-split">podstawa ${formatMoney(parts.base)} + dodatek ${entry.rate}% ${formatMoney(parts.bonus)}</div>
+              <div class="entry-split">${isAkord() ? `akord: godziny w sztukach + dodatek ${entry.rate}% ${formatMoney(parts.bonus)}` : `podstawa ${formatMoney(parts.base)} + dodatek ${entry.rate}% ${formatMoney(parts.bonus)}`}</div>
             </div>
             <div class="entry-pay">${formatMoney(pay)}</div>
             <div class="entry-actions">
@@ -685,6 +783,15 @@
     const t = monthSplit(monthEntries, rate);
     const row = (label, value, cls = "") =>
       `<div class="${cls}"><dt>${label}</dt><dd>${value}</dd></div>`;
+    if (isAkord()) {
+      els.breakdown.innerHTML = [
+        row(`Godziny nadliczbowe (${formatHours(t.hours50 + t.hours100)} h) — zapłacone w akordzie`, "w sztukach"),
+        row(`Dodatek 50% · ${formatHours(t.hours50)} h × ${formatMoney(roundGr(rate * 0.5))}`, formatMoney(t.bonus50), "b50"),
+        row(`Dodatek 100% · ${formatHours(t.hours100)} h × ${formatMoney(rate)}`, formatMoney(t.bonus100), "b100"),
+        row("Razem dodatki", formatMoney(roundGr(t.bonus50 + t.bonus100)), "sum"),
+      ].join("");
+      return;
+    }
     els.breakdown.innerHTML = [
       row(`Podstawa za nadgodziny (${formatHours(t.hours50 + t.hours100)} h × ${formatMoney(rate)})`, formatMoney(t.base)),
       row(`Dodatek 50% · ${formatHours(t.hours50)} h`, formatMoney(t.bonus50), "b50"),
@@ -896,12 +1003,18 @@
   /** Wiersze listy płac do wydruku i CSV: [etykieta, kwota, znak] */
   function payslipLines() {
     if (state.contract !== "uop") return contractLines().L;
-    const { slip, vac } = payslipFor(state.month);
+    const { slip, vac, sick, salaryCut } = payslipFor(state.month);
     const tx = state.tax;
-    const L = [["Pensja zasadnicza", slip.salary, ""]];
-    if (slip.overtime) L.push(["Nadgodziny (z dodatkami)", slip.overtime, "+"]);
+    const L = [];
+    if (isAkord()) {
+      L.push(["Zarobek z akordu", slip.akord, ""]);
+      if (slip.topUp) L.push(["Wyrównanie do płacy minimalnej", slip.topUp, "+"]);
+    } else L.push([salaryCut ? `Pensja zasadnicza (po potrąceniu ${formatHours(sick.days)} dni L4)` : "Pensja zasadnicza", slip.salary, ""]);
+    if (slip.overtime) L.push([isAkord() ? "Dodatki za nadgodziny (50% / 100%)" : "Nadgodziny (z dodatkami)", slip.overtime, "+"]);
     if (slip.premia) L.push(["Premia uznaniowa", slip.premia, "+"]);
     if (slip.vacation) L.push([`Urlop — składniki zmienne (${formatHours(vac.hours)} h)`, slip.vacation, "+"]);
+    if (slip.sickPay) L.push([`Wynagrodzenie chorobowe ${sick.rate}% (${formatHours(sick.empDays)} dni)`, slip.sickPay, "+"]);
+    if (slip.benefit) L.push([`Zasiłek chorobowy ${sick.rate}% (${formatHours(sick.benDays)} dni)`, slip.benefit, "+"]);
     L.push(["Wynagrodzenie brutto", slip.gross, "="]);
     L.push(["Składka emerytalna 9,76%", slip.pension, "−"]);
     L.push(["Składka rentowa 1,5%", slip.disability, "−"]);
@@ -1120,7 +1233,11 @@
       nominalManual = false;
       syncNominalFromMonth(true);
       state.nominalHours = Number(els.nominalHours.value);
-    } else if (id === "uzMode") u.mode = v;
+    } else if (id === "payType") state.pay.type = v === "akord" ? "akord" : "fixed";
+    else if (id === "akordHourly") state.pay.akordHourly = num();
+    else if (id === "sickBase") state.pay.sickBase = num();
+    else if (id === "age50") state.pay.age50 = e.target.checked;
+    else if (id === "uzMode") u.mode = v;
     else if (id === "uzRate") u.rate = num();
     else if (id === "uzHours") u.hours = num();
     else if (id === "uzAmount") u.amount = num();
@@ -1153,6 +1270,10 @@
     render();
   }
   els.premia.addEventListener("change", () => setMonthInfo("premia", els.premia.value));
+  ["akordUnits", "akordPrice", "akordAmount", "sickDays"].forEach((id) =>
+    document.getElementById(id).addEventListener("change", (e) => setMonthInfo(id, e.target.value))
+  );
+  document.getElementById("sickRate").addEventListener("change", (e) => setMonthInfo("sickRate", e.target.value));
   document.getElementById("premiaMode").addEventListener("change", (e) => {
     const cur = monthInfo(state.month);
     cur.premiaMode = e.target.value === "net" ? "net" : "gross";

@@ -29,28 +29,53 @@
   function payslip(p) {
     const parts = {
       salary: gr(Number(p.salary) || 0),
+      akord: gr(Number(p.akord) || 0),
+      topUp: gr(Number(p.topUp) || 0),
       overtime: gr(Number(p.overtimePay) || 0),
       premia: gr(Number(p.premia) || 0),
       vacation: gr(Number(p.vacationVariable) || 0),
+      sickPay: gr(Number(p.sickPay) || 0), // wynagrodzenie chorobowe (pracodawca)
+      benefit: gr(Number(p.benefit) || 0), // zasiłek chorobowy
     };
-    const gross = gr(parts.salary + parts.overtime + parts.premia + parts.vacation);
-    const pension = gr(gross * R.pension);
-    const disability = gr(gross * R.disability);
-    const sickness = gr(gross * R.sickness);
+    // Składki społeczne tylko od wynagrodzenia za pracę (bez chorobowego i zasiłku)
+    const work = gr(parts.salary + parts.akord + parts.topUp + parts.overtime + parts.premia + parts.vacation);
+    const gross = gr(work + parts.sickPay + parts.benefit);
+    const pension = gr(work * R.pension);
+    const disability = gr(work * R.disability);
+    const sickness = gr(work * R.sickness);
     const social = gr(pension + disability + sickness);
-    const health = gr((gross - social) * R.health);
+    // Zdrowotna: od pracy po składkach + od wynagrodzenia chorobowego; zasiłek bez zdrowotnej
+    const health = gr((work - social + parts.sickPay) * R.health);
 
     const ppkOn = p.ppk && p.ppk.on;
-    const ppkEmp = ppkOn ? gr((gross * (Number(p.ppk.emp) || 0)) / 100) : 0;
-    const ppkEr = ppkOn ? gr((gross * (Number(p.ppk.er) || 0)) / 100) : 0;
+    const ppkEmp = ppkOn ? gr((work * (Number(p.ppk.emp) || 0)) / 100) : 0;
+    const ppkEr = ppkOn ? gr((work * (Number(p.ppk.er) || 0)) / 100) : 0;
 
-    const kup = Math.min(Number(p.kup) || 250, Math.max(0, gross - social));
-    const taxBase = Math.max(0, zl(gross - social - kup + ppkEr));
-    let pit = 0;
-    if (p.age !== "under26") pit = Math.max(0, zl(taxBase * R.pit - (p.pit2 ? R.pit2 : 0)));
+    const employment = gr(work - social + parts.sickPay); // przychód ze stosunku pracy po składkach
+    const kup = employment > 0 ? Math.min(Number(p.kup) || 250, employment) : 0;
+    let taxBase, pit;
+    if (p.age === "under26") {
+      // ulga dla młodych obejmuje pracę i chorobowe od pracodawcy, ale nie zasiłek
+      taxBase = Math.max(0, zl(parts.benefit));
+    } else {
+      taxBase = Math.max(0, zl(employment - kup + parts.benefit + ppkEr));
+    }
+    pit = taxBase ? Math.max(0, zl(taxBase * R.pit - (p.pit2 ? R.pit2 : 0))) : 0;
 
     const net = gr(gross - social - health - pit - ppkEmp);
-    return { ...parts, gross, pension, disability, sickness, social, health, kup, ppkEmp, ppkEr, taxBase, pit, net };
+    return { ...parts, work, gross, pension, disability, sickness, social, health, kup, ppkEmp, ppkEr, taxBase, pit, net };
+  }
+
+  /**
+   * L4 — dzienna stawka i kwota.
+   * base: średnie brutto z 12 miesięcy; minimum: płaca minimalna × etat; rate: 80 lub 100 (%)
+   */
+  const MIN_WAGE = 4806;
+  function sickDaily(base, etat, rate) {
+    const b = Math.max(Number(base) || 0, MIN_WAGE * (Number(etat) || 1));
+    const afterSocial = gr(b - gr(b * (R.pension + R.disability + R.sickness)));
+    const per100 = gr(afterSocial / 30);
+    return { afterSocial, per100, daily: gr((per100 * (Number(rate) || 80)) / 100) };
   }
 
   /**
@@ -142,7 +167,7 @@
     return { revenue, costs: allCosts, fp, pension, disability, accident, sickness, social, health, taxBase, pit, net, form };
   }
 
-  const api = { R, gr, payslip, vacationVariable, childRelief, zlecenie, b2b, ZUS_JDG, HEALTH_MIN };
+  const api = { R, gr, payslip, sickDaily, MIN_WAGE, vacationVariable, childRelief, zlecenie, b2b, ZUS_JDG, HEALTH_MIN };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.Payroll = api;
 })(typeof window !== "undefined" ? window : globalThis);

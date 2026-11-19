@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,500;7..72,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=8" />
+  <link rel="stylesheet" href="css/styles.css?v=9" />
   <title>Twoja wypłata</title>
 </head>
 <body>
@@ -130,6 +130,18 @@
           <input type="number" id="uzAmount" min="0" step="0.01" inputmode="decimal" />
         </label>
         <label data-only="uop">
+          <span>Sposób wynagradzania</span>
+          <select id="payType">
+            <option value="fixed">Stała pensja miesięczna</option>
+            <option value="akord">Akord (za sztuki / wykonaną pracę)</option>
+          </select>
+        </label>
+        <label data-only="uop" id="akordHourlyRow">
+          <span>Stawka godzinowa z umowy — do dodatków za nadgodziny (zł)</span>
+          <input type="number" id="akordHourly" min="0" step="0.01" inputmode="decimal" placeholder="puste = z płacy minimalnej" />
+          <small>Na akordzie godziny nadliczbowe są już zapłacone w sztukach — dochodzi tylko dodatek 50% / 100% od tej stawki.</small>
+        </label>
+        <label data-only="uop" id="salaryRow">
           <span id="salaryLabel">Pensja miesięczna brutto (zł)</span>
           <input type="number" id="salary" name="salary" min="1" step="0.01" value="5265" required />
         </label>
@@ -153,7 +165,7 @@
     <section class="panel" aria-labelledby="monthTitle" data-only="uop">
       <div class="section-head">
         <h2 id="monthTitle">Ten miesiąc</h2>
-        <p>Premia i urlop w wybranym miesiącu.</p>
+        <p>Premia, akord, urlop i L4 w wybranym miesiącu.</p>
       </div>
       <form id="monthForm" class="form-grid" autocomplete="off">
         <label>
@@ -168,6 +180,30 @@
           <input type="number" id="premia" min="0" step="0.01" inputmode="decimal" placeholder="0" />
         </label>
         <p class="type-preview full" id="premiaInfo" aria-live="polite" hidden></p>
+        <label id="akordUnitsRow">
+          <span>Akord — liczba sztuk / jednostek</span>
+          <input type="number" id="akordUnits" min="0" step="1" inputmode="decimal" placeholder="0" />
+        </label>
+        <label id="akordPriceRow">
+          <span>Stawka za sztukę (zł brutto)</span>
+          <input type="number" id="akordPrice" min="0" step="0.001" inputmode="decimal" placeholder="0" />
+        </label>
+        <label class="full" id="akordAmountRow">
+          <span>…albo cały zarobek z akordu w miesiącu (zł brutto)</span>
+          <input type="number" id="akordAmount" min="0" step="0.01" inputmode="decimal" placeholder="puste = sztuki × stawka" />
+        </label>
+        <label>
+          <span>Dni na L4 w tym miesiącu (kalendarzowe)</span>
+          <input type="number" id="sickDays" min="0" max="31" step="1" inputmode="numeric" placeholder="0" />
+        </label>
+        <label>
+          <span>Rodzaj zwolnienia</span>
+          <select id="sickRate">
+            <option value="80">Choroba — 80%</option>
+            <option value="100">Ciąża, wypadek w drodze do/z pracy — 100%</option>
+          </select>
+        </label>
+        <p class="type-preview full" id="sickInfo" aria-live="polite" hidden></p>
         <label>
           <span>Dni urlopu w tym miesiącu</span>
           <input type="number" id="leaveDays" min="0" max="31" step="0.5" inputmode="decimal" placeholder="0" />
@@ -246,6 +282,12 @@
           <input type="number" id="ppkEr" min="1.5" max="4" step="0.5" inputmode="decimal" />
           <small>Wpłata pracodawcy nie zmniejsza pensji, ale zwiększa podatek.</small>
         </label>
+        <label data-only="uop">
+          <span>Średnie brutto z 12 miesięcy — do L4 (zł)</span>
+          <input type="number" id="sickBase" min="0" step="0.01" inputmode="decimal" placeholder="puste = pensja / średni akord" />
+          <small>Razem z premiami i nadgodzinami z ostatniego roku. Podstawa nie może być niższa niż płaca minimalna.</small>
+        </label>
+        <label class="check" data-only="uop"><input type="checkbox" id="age50" /><span>Mam 50 lat lub więcej (pracodawca płaci 14 dni L4 w roku, dalej ZUS)</span></label>
         <label data-only="uop">
           <span>Urlop w roku (dni)</span>
           <select id="leaveLimit">
@@ -355,6 +397,8 @@
         <li>Zgodnie z art. 151¹ Kodeksu pracy (umowa o pracę).</li>
         <li>Na rękę: brutto − składki ZUS (13,71%) − zdrowotna 9% − zaliczka PIT 12% (PIT-2: −300 zł; do 26 lat: 0) − PPK.</li>
         <li>Urlop: pensja bez zmian + nadgodziny ze średniej 3 poprzednich miesięcy (premia uznaniowa się nie wlicza).</li>
+        <li>L4: 80% (ciąża, wypadek w drodze do pracy — 100%) średniego brutto z 12 miesięcy po odjęciu 13,71%, ÷ 30 za każdy dzień. Pierwsze 33 dni w roku (po 50. roku życia — 14) płaci pracodawca, dalej zasiłek z ZUS. Pensja maleje o 1/30 za dzień L4.</li>
+        <li>Akord: zarobek ze sztuk; jeśli wyjdzie mniej niż płaca minimalna — pracodawca dopłaca wyrównanie. Za nadgodziny dochodzi tylko dodatek 50% / 100%.</li>
       </ul>
       <p class="disclaimer">To narzędzie pomocnicze. Ostateczne rozliczenie zależy od grafiku, godzin nocnych i regulaminu pracodawcy.</p>
     </section>
@@ -364,8 +408,8 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="js/holidays.js?v=8"></script>
-  <script src="js/payroll.js?v=8"></script>
-  <script src="js/app.js?v=8"></script>
+  <script src="js/holidays.js?v=9"></script>
+  <script src="js/payroll.js?v=9"></script>
+  <script src="js/app.js?v=9"></script>
 </body>
 </html>
