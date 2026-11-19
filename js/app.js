@@ -27,6 +27,9 @@
     printBtn: document.getElementById("printBtn"),
     csvBtn: document.getElementById("csvBtn"),
     printReport: document.getElementById("printReport"),
+    monthSel: document.getElementById("monthSel"),
+    yearSel: document.getElementById("yearSel"),
+    breakdown: document.getElementById("breakdown"),
     toast: document.getElementById("toast"),
   };
 
@@ -105,10 +108,43 @@
     }).format(d);
   }
 
+  const MONTHS_PL = [
+    "Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec",
+    "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień",
+  ];
+
   function monthTitle(value) {
     const { year, monthIndex } = parseMonth(value);
-    const d = new Date(year, monthIndex, 1);
-    return new Intl.DateTimeFormat("pl-PL", { month: "long", year: "numeric" }).format(d);
+    return `${MONTHS_PL[monthIndex]} ${year}`;
+  }
+
+  /** Wypełnia listy miesięcy i lat po polsku (niezależnie od języka telefonu). */
+  function setupMonthPicker() {
+    els.monthSel.innerHTML = MONTHS_PL.map(
+      (name, i) => `<option value="${String(i + 1).padStart(2, "0")}">${name}</option>`
+    ).join("");
+    const now = new Date().getFullYear();
+    const years = [];
+    for (let y = now - 3; y <= now + 1; y++) years.push(y);
+    els.yearSel.innerHTML = years.map((y) => `<option value="${y}">${y}</option>`).join("");
+  }
+
+  function setMonthValue(value) {
+    const [y, m] = value.split("-");
+    if (![...els.yearSel.options].some((o) => o.value === y)) {
+      els.yearSel.insertAdjacentHTML("beforeend", `<option value="${y}">${y}</option>`);
+      [...els.yearSel.options]
+        .sort((a, b) => a.value - b.value)
+        .forEach((o) => els.yearSel.appendChild(o));
+    }
+    els.yearSel.value = y;
+    els.monthSel.value = m;
+    els.month.value = value;
+  }
+
+  function onMonthPicked() {
+    els.month.value = `${els.yearSel.value}-${els.monthSel.value}`;
+    els.month.dispatchEvent(new Event("change"));
   }
 
   function resolveRateType(isoDate, override) {
@@ -130,23 +166,37 @@
     return { rate: 50, reason: "Dzień powszedni → 50%" };
   }
 
+  /** Stawka godzinowa zaokrąglona do 1 grosza — od niej liczymy wszystko dalej. */
   function hourlyRate() {
     const hours = Number(state.nominalHours) || 1;
-    return state.salary / hours;
+    return roundGr(state.salary / hours);
   }
 
+  /** Zaokrąglenie do 1 grosza „jak w księgowości” (0,005 zawsze w górę). */
   function roundGr(n) {
-    return Math.round((n + Number.EPSILON) * 100) / 100;
+    const cents = Number((Math.abs(n) * 100).toFixed(6));
+    return (Math.sign(n) * Math.round(cents)) / 100;
   }
 
-  /** Stawka z dodatkiem zaokrąglona do 1 grosza (ta sama, którą widać na wydruku). */
+  /** Stawka samego dodatku za 1 h (50% lub 100% stawki), do 1 grosza. */
+  function bonusRate(entry, rate) {
+    return roundGr(rate * (entry.rate / 100));
+  }
+
+  /** Stawka z dodatkiem = stawka + stawka dodatku. */
   function rateWithBonus(entry, rate) {
-    return roundGr(rate * (1 + entry.rate / 100));
+    return roundGr(rate + bonusRate(entry, rate));
   }
 
-  /** Wypłata za nadgodzinę = godziny × stawka z dodatkiem (już zaokrąglona), do 1 grosza. */
+  /** Rozbicie wpisu: podstawa (godziny × stawka) + dodatek (godziny × stawka dodatku). */
+  function splitEntry(entry, rate) {
+    const base = roundGr(entry.hours * rate);
+    const bonus = roundGr(entry.hours * bonusRate(entry, rate));
+    return { base, bonus, total: roundGr(base + bonus) };
+  }
+
   function payForEntry(entry, rate) {
-    return roundGr(entry.hours * rateWithBonus(entry, rate));
+    return splitEntry(entry, rate).total;
   }
 
   function entriesForMonth() {
@@ -185,7 +235,7 @@
     }
     const override = els.entryType.value === "auto" ? "auto" : els.entryType.value;
     const resolved = resolveRateType(date, override);
-    els.typePreview.textContent = resolved.reason;
+    els.typePreview.textContent = `${formatDateLabel(date)} · ${resolved.reason}`;
   }
 
   function render() {
@@ -198,6 +248,7 @@
     els.hourlyRate.textContent = formatMoney(rate);
     els.totalHours.textContent = formatHours(totalHours);
     els.totalPay.textContent = formatMoney(totalPay);
+    renderBreakdown(monthEntries, rate);
 
     if (!monthEntries.length) {
       els.listCount.textContent = "Brak wpisów w tym miesiącu.";
@@ -210,7 +261,8 @@
     els.clearMonthBtn.hidden = false;
     els.entryList.innerHTML = monthEntries
       .map((entry) => {
-        const pay = payForEntry(entry, rate);
+        const parts = splitEntry(entry, rate);
+        const pay = parts.total;
         const badgeClass = entry.rate === 100 ? "weekend" : "";
         const note = entry.note ? ` · ${escapeHtml(entry.note)}` : "";
         return `
@@ -221,6 +273,7 @@
                 <span class="badge ${badgeClass}">+${entry.rate}%</span>
               </div>
               <div class="entry-meta">${formatHours(entry.hours)} h${note}</div>
+              <div class="entry-split">podstawa ${formatMoney(parts.base)} + dodatek ${entry.rate}% ${formatMoney(parts.bonus)}</div>
             </div>
             <div class="entry-pay">${formatMoney(pay)}</div>
             <div class="entry-actions">
@@ -230,6 +283,37 @@
         `;
       })
       .join("");
+  }
+
+  /** Sumy miesiąca rozbite na podstawę i dodatki 50% / 100%. */
+  function monthSplit(monthEntries, rate) {
+    const acc = { base: 0, bonus50: 0, bonus100: 0, hours50: 0, hours100: 0 };
+    monthEntries.forEach((e) => {
+      const p = splitEntry(e, rate);
+      acc.base += p.base;
+      if (e.rate === 100) {
+        acc.bonus100 += p.bonus;
+        acc.hours100 += e.hours;
+      } else {
+        acc.bonus50 += p.bonus;
+        acc.hours50 += e.hours;
+      }
+    });
+    Object.keys(acc).forEach((k) => (acc[k] = roundGr(acc[k])));
+    acc.total = roundGr(acc.base + acc.bonus50 + acc.bonus100);
+    return acc;
+  }
+
+  function renderBreakdown(monthEntries, rate) {
+    const t = monthSplit(monthEntries, rate);
+    const row = (label, value, cls = "") =>
+      `<div class="${cls}"><dt>${label}</dt><dd>${value}</dd></div>`;
+    els.breakdown.innerHTML = [
+      row(`Podstawa za nadgodziny (${formatHours(t.hours50 + t.hours100)} h × ${formatMoney(rate)})`, formatMoney(t.base)),
+      row(`Dodatek 50% · ${formatHours(t.hours50)} h`, formatMoney(t.bonus50), "b50"),
+      row(`Dodatek 100% · ${formatHours(t.hours100)} h`, formatMoney(t.bonus100), "b100"),
+      row("Razem do wypłaty", formatMoney(t.total), "sum"),
+    ].join("");
   }
 
   function pluralEntries(n) {
@@ -278,11 +362,17 @@
     const rows = entriesForMonth()
       .slice()
       .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt)
-      .map((e) => ({
-        ...e,
-        rateWithBonus: rateWithBonus(e, rate),
-        pay: payForEntry(e, rate),
-      }));
+      .map((e) => {
+        const p = splitEntry(e, rate);
+        return {
+          ...e,
+          bonusRate: bonusRate(e, rate),
+          rateWithBonus: rateWithBonus(e, rate),
+          base: p.base,
+          bonus: p.bonus,
+          pay: p.total,
+        };
+      });
     const sum = (list, key) => roundGr(list.reduce((s, r) => s + r[key], 0));
     const r50 = rows.filter((r) => r.rate === 50);
     const r100 = rows.filter((r) => r.rate === 100);
@@ -290,10 +380,12 @@
       rate,
       rows,
       hours50: sum(r50, "hours"),
-      pay50: sum(r50, "pay"),
+      bonus50: sum(r50, "bonus"),
       hours100: sum(r100, "hours"),
-      pay100: sum(r100, "pay"),
+      bonus100: sum(r100, "bonus"),
       totalHours: sum(rows, "hours"),
+      totalBase: sum(rows, "base"),
+      totalBonus: sum(rows, "bonus"),
       totalPay: sum(rows, "pay"),
     };
   }
@@ -335,7 +427,8 @@
             <td>${escapeHtml(weekdayName(r.date))}</td>
             <td class="num">${formatHours(r.hours)}</td>
             <td class="num">${r.rate}%</td>
-            <td class="num">${formatMoney(r.rateWithBonus)}</td>
+            <td class="num">${formatMoney(r.base)}</td>
+            <td class="num">${formatMoney(r.bonus)}</td>
             <td class="num">${formatMoney(r.pay)}</td>
             <td>${escapeHtml(r.note || "")}</td>
           </tr>`
@@ -358,8 +451,9 @@
             <th>Dzień</th>
             <th class="num">Godziny</th>
             <th class="num">Dodatek</th>
-            <th class="num">Stawka z dodatkiem</th>
-            <th class="num">Kwota brutto</th>
+            <th class="num">Podstawa</th>
+            <th class="num">Kwota dodatku</th>
+            <th class="num">Razem brutto</th>
             <th>Uwagi</th>
           </tr>
         </thead>
@@ -369,7 +463,8 @@
             <td colspan="3">Razem</td>
             <td class="num">${formatHours(data.totalHours)}</td>
             <td></td>
-            <td></td>
+            <td class="num">${formatMoney(data.totalBase)}</td>
+            <td class="num">${formatMoney(data.totalBonus)}</td>
             <td class="num">${formatMoney(data.totalPay)}</td>
             <td></td>
           </tr>
@@ -379,14 +474,19 @@
       <table class="pr-summary">
         <tbody>
           <tr>
-            <th>Nadgodziny z dodatkiem 50% (dni powszednie)</th>
-            <td class="num">${formatHours(data.hours50)} h</td>
-            <td class="num">${formatMoney(data.pay50)}</td>
+            <th>Podstawa — wynagrodzenie za godziny nadliczbowe (${formatMoney(data.rate)} / h)</th>
+            <td class="num">${formatHours(data.totalHours)} h</td>
+            <td class="num">${formatMoney(data.totalBase)}</td>
           </tr>
           <tr>
-            <th>Nadgodziny z dodatkiem 100% (weekendy, święta, dni wolne)</th>
+            <th>Dodatek 50% — dni powszednie (${formatMoney(roundGr(data.rate * 0.5))} / h)</th>
+            <td class="num">${formatHours(data.hours50)} h</td>
+            <td class="num">${formatMoney(data.bonus50)}</td>
+          </tr>
+          <tr>
+            <th>Dodatek 100% — weekendy, święta, dni wolne (${formatMoney(data.rate)} / h)</th>
             <td class="num">${formatHours(data.hours100)} h</td>
-            <td class="num">${formatMoney(data.pay100)}</td>
+            <td class="num">${formatMoney(data.bonus100)}</td>
           </tr>
           <tr class="pr-grand">
             <th>Łącznie do wypłaty za nadgodziny (brutto)</th>
@@ -402,7 +502,7 @@
       </div>
 
       <footer class="pr-foot">
-        <p>Stawka godzinowa = pensja brutto ÷ godziny nominalne miesiąca. Stawka z dodatkiem = stawka godzinowa × 1,5 (50%) lub × 2,0 (100%), zaokrąglona do 1 grosza. Kwota = godziny × stawka z dodatkiem (art. 151¹ Kodeksu pracy).</p>
+        <p>Stawka godzinowa = pensja brutto ÷ godziny nominalne miesiąca (do 1 grosza). Podstawa = godziny × stawka. Dodatek = godziny × 50% lub 100% stawki (do 1 grosza). Razem = podstawa + dodatek (art. 151¹ Kodeksu pracy).</p>
         <p>Zestawienie pomocnicze — ostateczne rozliczenie zależy od grafiku i regulaminu pracodawcy. Wygenerowano: ${escapeHtml(generated)} · Nadgodziny PL</p>
       </footer>
     `;
@@ -426,7 +526,7 @@
     add("Godziny nominalne", formatNumberPl(Number(state.nominalHours) || 0, 0));
     add("Stawka godzinowa (zł)", formatNumberPl(data.rate));
     add();
-    add("Lp.", "Data", "Dzień", "Godziny", "Dodatek (%)", "Stawka z dodatkiem (zł)", "Kwota brutto (zł)", "Uwagi");
+    add("Lp.", "Data", "Dzień", "Godziny", "Dodatek (%)", "Podstawa (zł)", "Kwota dodatku (zł)", "Razem brutto (zł)", "Uwagi");
     data.rows.forEach((r, i) =>
       add(
         i + 1,
@@ -434,16 +534,19 @@
         weekdayName(r.date),
         formatNumberPl(r.hours),
         r.rate,
-        formatNumberPl(r.rateWithBonus),
+        formatNumberPl(r.base),
+        formatNumberPl(r.bonus),
         formatNumberPl(r.pay),
         r.note || ""
       )
     );
-    add("Razem", "", "", formatNumberPl(data.totalHours), "", "", formatNumberPl(data.totalPay), "");
+    add("Razem", "", "", formatNumberPl(data.totalHours), "", formatNumberPl(data.totalBase), formatNumberPl(data.totalBonus), formatNumberPl(data.totalPay), "");
     add();
-    add("Nadgodziny 50% (h)", formatNumberPl(data.hours50), "Kwota 50% (zł)", formatNumberPl(data.pay50));
-    add("Nadgodziny 100% (h)", formatNumberPl(data.hours100), "Kwota 100% (zł)", formatNumberPl(data.pay100));
-    add("Łącznie (h)", formatNumberPl(data.totalHours), "Łącznie (zł)", formatNumberPl(data.totalPay));
+    add("Podsumowanie", "Godziny", "Kwota (zł)");
+    add("Podstawa za nadgodziny", formatNumberPl(data.totalHours), formatNumberPl(data.totalBase));
+    add("Dodatek 50%", formatNumberPl(data.hours50), formatNumberPl(data.bonus50));
+    add("Dodatek 100%", formatNumberPl(data.hours100), formatNumberPl(data.bonus100));
+    add("Łącznie do wypłaty", formatNumberPl(data.totalHours), formatNumberPl(data.totalPay));
 
     // BOM, żeby Excel poprawnie pokazał polskie znaki
     return { text: "﻿" + lines.join("\r\n"), count: data.rows.length };
@@ -497,7 +600,10 @@
   els.employeeName.value = state.employeeName || "";
   els.employerName.value = state.employerName || "";
   els.salary.value = String(state.salary);
-  els.month.value = state.month;
+  setupMonthPicker();
+  setMonthValue(state.month);
+  els.monthSel.addEventListener("change", onMonthPicked);
+  els.yearSel.addEventListener("change", onMonthPicked);
   if (state.nominalHours) {
     els.nominalHours.value = String(state.nominalHours);
     els.nominalHint.textContent = "Możesz zmienić ręcznie lub wrócić do auto przy zmianie miesiąca.";
@@ -559,7 +665,7 @@
     state.entries.push(entry);
     // Przełącz widok na miesiąc wpisu
     state.month = date.slice(0, 7);
-    els.month.value = state.month;
+    setMonthValue(state.month);
     if (!nominalManual) syncNominalFromMonth(true);
     state.nominalHours = Number(els.nominalHours.value);
     saveState();

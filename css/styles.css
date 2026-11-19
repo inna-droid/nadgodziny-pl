@@ -468,6 +468,90 @@ select:focus {
   }
 }
 
+/* ---------- Wybór miesiąca po polsku ---------- */
+
+.month-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.field-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.month-pick {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 0.5rem;
+}
+
+/* ---------- Rozbicie: podstawa + dodatki ---------- */
+
+.breakdown {
+  padding: 0.85rem 1rem 0.6rem;
+  border-radius: 14px;
+  background: rgba(15, 61, 54, 0.06);
+}
+
+.breakdown-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--teal-mid);
+}
+
+.breakdown dl {
+  margin: 0;
+  display: grid;
+}
+
+.breakdown dl > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+
+.breakdown dt {
+  color: var(--ink-soft);
+}
+
+.breakdown dd {
+  margin: 0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.breakdown .b50 dd {
+  color: #8a5a14;
+}
+
+.breakdown .b100 dd {
+  color: var(--teal-mid);
+}
+
+.breakdown .sum {
+  border-bottom: none;
+  font-size: 1rem;
+}
+
+.breakdown .sum dt {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.entry-split {
+  font-size: 0.78rem;
+  color: var(--teal-mid);
+}
+
 /* ---------- Eksport i wydruk ---------- */
 
 .export-hint {
@@ -556,7 +640,8 @@ select:focus {
   .pr-table th,
   .pr-table td {
     border: 1px solid #888;
-    padding: 1.6mm 2mm;
+    padding: 1.5mm 1.6mm;
+    font-size: 9.5pt;
     vertical-align: top;
     text-align: left;
   }

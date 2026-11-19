@@ -53,6 +53,10 @@
             <strong id="hourlyRate">0,00 zł</strong>
           </div>
         </div>
+        <div class="breakdown" aria-label="Rozbicie wypłaty za nadgodziny">
+          <p class="breakdown-title">Rozbicie wypłaty</p>
+          <dl id="breakdown"></dl>
+        </div>
       </div>
     </section>
 
@@ -67,10 +71,14 @@
           <span>Pensja miesięczna brutto (zł)</span>
           <input type="number" id="salary" name="salary" min="1" step="0.01" value="5265" required />
         </label>
-        <label>
-          <span>Miesiąc rozliczenia</span>
-          <input type="month" id="month" name="month" required />
-        </label>
+        <div class="month-field">
+          <span class="field-label" id="monthFieldLabel">Miesiąc rozliczenia</span>
+          <div class="month-pick" role="group" aria-labelledby="monthFieldLabel">
+            <select id="monthSel" aria-label="Miesiąc"></select>
+            <select id="yearSel" aria-label="Rok"></select>
+          </div>
+          <input type="hidden" id="month" name="month" />
+        </div>
         <label>
           <span>Godziny nominalne w miesiącu</span>
           <input type="number" id="nominalHours" name="nominalHours" min="1" step="1" required />
@@ -147,10 +155,10 @@
     <section class="panel info" aria-labelledby="infoTitle">
       <h2 id="infoTitle">Jak liczymy</h2>
       <ul class="rules">
-        <li>Stawka godzinowa = pensja brutto ÷ godziny nominalne miesiąca.</li>
-        <li>Dzień powszedni: wypłata = stawka × 1,5 (podstawa + 50%).</li>
-        <li>Weekend / święto / dzień wolny: wypłata = stawka × 2,0 (podstawa + 100%).</li>
-        <li>Stawka z dodatkiem jest zaokrąglana do 1 grosza, a kwota = godziny × ta stawka — wynik zgadza się z ręcznym przeliczeniem.</li>
+        <li>Stawka godzinowa = pensja brutto ÷ godziny nominalne miesiąca, zaokrąglona do 1 grosza.</li>
+        <li>Za każdą nadgodzinę: <strong>podstawa</strong> (godziny × stawka) + <strong>dodatek</strong>.</li>
+        <li>Dzień powszedni: dodatek 50% stawki. Weekend / święto / dzień wolny: dodatek 100% stawki.</li>
+        <li>Stawka dodatku jest zaokrąglana do 1 grosza — każdą kwotę można sprawdzić na kalkulatorze.</li>
         <li>Zgodnie z art. 151¹ Kodeksu pracy (umowa o pracę).</li>
       </ul>
       <p class="disclaimer">To narzędzie pomocnicze. Ostateczne rozliczenie zależy od grafiku, godzin nocnych i regulaminu pracodawcy.</p>

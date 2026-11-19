@@ -1,4 +1,4 @@
-const CACHE = "nadgodziny-pl-v2";
+const CACHE = "nadgodziny-pl-v3";
 const ASSETS = [
   "./",
   "./index.html",
