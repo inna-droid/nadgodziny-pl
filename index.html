@@ -156,9 +156,17 @@
       </div>
       <form id="monthForm" class="form-grid" autocomplete="off">
         <label>
-          <span>Premia uznaniowa (zł brutto)</span>
+          <span>Premia uznaniowa — wpisuję kwotę</span>
+          <select id="premiaMode">
+            <option value="gross">brutto (jak w decyzji o premii)</option>
+            <option value="net">netto (ile ma być na rękę)</option>
+          </select>
+        </label>
+        <label>
+          <span id="premiaLabel">Premia uznaniowa (zł brutto)</span>
           <input type="number" id="premia" min="0" step="0.01" inputmode="decimal" placeholder="0" />
         </label>
+        <p class="type-preview full" id="premiaInfo" aria-live="polite" hidden></p>
         <label>
           <span>Dni urlopu w tym miesiącu</span>
           <input type="number" id="leaveDays" min="0" max="31" step="0.5" inputmode="decimal" placeholder="0" />

@@ -298,7 +298,7 @@
   const pct = (v) => String(Number(v) || 0).replace(".", ",");
 
   function monthInfo(key) {
-    return Object.assign({ premia: 0, leaveDays: 0 }, state.monthData[key] || {});
+    return Object.assign({ premia: 0, premiaMode: "gross", leaveDays: 0 }, state.monthData[key] || {});
   }
 
   function shiftMonth(key, delta) {
@@ -334,6 +334,41 @@
     return { ...Payroll.vacationVariable(history, hours), hours };
   }
 
+  function slipWithPremia(key, premiaGross) {
+    const tx = state.tax;
+    const ot = overtimeFor(key);
+    const vac = vacationFor(key);
+    return Payroll.payslip({
+      salary: state.salary,
+      overtimePay: ot.pay,
+      premia: premiaGross,
+      vacationVariable: vac.amount,
+      age: tx.status === "26plus" ? "26plus" : "under26",
+      kup: Number(tx.kup) || 250,
+      pit2: tx.pit2,
+      ppk: { on: tx.ppkOn, emp: tx.ppkEmp, er: tx.ppkEr },
+    });
+  }
+
+  /** Premia brutto: wpisana, albo wyliczona z kwoty netto (ile więcej na rękę dzięki premii). */
+  function premiaGrossFor(key) {
+    const info = monthInfo(key);
+    const amount = Number(info.premia) || 0;
+    if (info.premiaMode !== "net" || !amount) return amount;
+    const base = slipWithPremia(key, 0).net;
+    const gain = (g) => roundGr(slipWithPremia(key, g).net - base);
+    let lo = 0, hi = amount * 3;
+    for (let i = 0; i < 60; i++) {
+      const mid = (lo + hi) / 2;
+      if (gain(mid) < amount) lo = mid;
+      else hi = mid;
+    }
+    // najbliższa kwota w groszach, która daje co najmniej żądane netto
+    let g = Math.floor(lo * 100) / 100;
+    for (let i = 0; i < 400 && gain(g) < amount; i++) g = roundGr(g + 0.01);
+    return g;
+  }
+
   function payslipFor(key) {
     const tx = state.tax;
     const ot = overtimeFor(key);
@@ -341,7 +376,7 @@
     const slip = Payroll.payslip({
       salary: state.salary,
       overtimePay: ot.pay,
-      premia: monthInfo(key).premia,
+      premia: premiaGrossFor(key),
       vacationVariable: vac.amount,
       age: tx.status === "26plus" ? "26plus" : "under26",
       kup: Number(tx.kup) || 250,
@@ -488,6 +523,15 @@
 
     const info = monthInfo(state.month);
     els.premia.value = info.premia || "";
+    const pm = document.getElementById("premiaMode");
+    pm.value = info.premiaMode;
+    document.getElementById("premiaLabel").textContent = info.premiaMode === "net" ? "Premia uznaniowa (zł netto — na rękę)" : "Premia uznaniowa (zł brutto)";
+    const pInfo = document.getElementById("premiaInfo");
+    if (slip.premia) {
+      const gain = roundGr(slip.net - slipWithPremia(state.month, 0).net);
+      pInfo.hidden = false;
+      pInfo.textContent = `Premia: ${formatMoney(slip.premia)} brutto → ${formatMoney(gain)} na rękę (po ZUS, zdrowotnej${tx.status === "26plus" ? ", podatku" : ""}${tx.ppkOn ? " i PPK" : ""}).`;
+    } else pInfo.hidden = true;
     els.leaveDays.value = info.leaveDays || "";
     els.leaveInfo.textContent = info.leaveDays
       ? `Urlop: ${formatHours(Number(info.leaveDays))} dni (${formatHours(vac.hours)} h). Pensja zasadnicza bez zmian` +
@@ -1090,6 +1134,13 @@
     render();
   }
   els.premia.addEventListener("change", () => setMonthInfo("premia", els.premia.value));
+  document.getElementById("premiaMode").addEventListener("change", (e) => {
+    const cur = monthInfo(state.month);
+    cur.premiaMode = e.target.value === "net" ? "net" : "gross";
+    state.monthData[state.month] = cur;
+    saveState();
+    render();
+  });
   els.leaveDays.addEventListener("change", () => {
     const max = Number(state.tax.leaveLimit) || 26;
     setMonthInfo("leaveDays", Math.min(31, Number(els.leaveDays.value) || 0));
