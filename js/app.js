@@ -135,10 +135,18 @@
     return state.salary / hours;
   }
 
-  /** Wypłata za nadgodzinę = stawka × (1 + premia/100), zaokrąglenie do 1 grosza. */
+  function roundGr(n) {
+    return Math.round((n + Number.EPSILON) * 100) / 100;
+  }
+
+  /** Stawka z dodatkiem zaokrąglona do 1 grosza (ta sama, którą widać na wydruku). */
+  function rateWithBonus(entry, rate) {
+    return roundGr(rate * (1 + entry.rate / 100));
+  }
+
+  /** Wypłata za nadgodzinę = godziny × stawka z dodatkiem (już zaokrąglona), do 1 grosza. */
   function payForEntry(entry, rate) {
-    const multiplier = 1 + entry.rate / 100;
-    return Math.round(entry.hours * rate * multiplier * 100) / 100;
+    return roundGr(entry.hours * rateWithBonus(entry, rate));
   }
 
   function entriesForMonth() {
@@ -272,10 +280,10 @@
       .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt)
       .map((e) => ({
         ...e,
-        rateWithBonus: Math.round(rate * (1 + e.rate / 100) * 100) / 100,
+        rateWithBonus: rateWithBonus(e, rate),
         pay: payForEntry(e, rate),
       }));
-    const sum = (list, key) => list.reduce((s, r) => s + r[key], 0);
+    const sum = (list, key) => roundGr(list.reduce((s, r) => s + r[key], 0));
     const r50 = rows.filter((r) => r.rate === 50);
     const r100 = rows.filter((r) => r.rate === 100);
     return {
@@ -394,7 +402,7 @@
       </div>
 
       <footer class="pr-foot">
-        <p>Kwota za nadgodzinę = stawka godzinowa × (1 + dodatek). Stawka godzinowa = pensja brutto ÷ godziny nominalne miesiąca (art. 151¹ Kodeksu pracy).</p>
+        <p>Stawka godzinowa = pensja brutto ÷ godziny nominalne miesiąca. Stawka z dodatkiem = stawka godzinowa × 1,5 (50%) lub × 2,0 (100%), zaokrąglona do 1 grosza. Kwota = godziny × stawka z dodatkiem (art. 151¹ Kodeksu pracy).</p>
         <p>Zestawienie pomocnicze — ostateczne rozliczenie zależy od grafiku i regulaminu pracodawcy. Wygenerowano: ${escapeHtml(generated)} · Nadgodziny PL</p>
       </footer>
     `;
