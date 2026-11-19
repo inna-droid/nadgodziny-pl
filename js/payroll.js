@@ -72,7 +72,77 @@
     return gr(sum);
   }
 
-  const api = { R, gr, payslip, vacationVariable, childRelief };
+  // ---------- umowa zlecenie (2026) ----------
+  /**
+   * status: "student26" (brak ZUS i PIT) | "under26" (ZUS, PIT 0) | "etat" (inna praca ≥ min. krajowa: tylko zdrowotna + PIT) | "only" (pełny ZUS + PIT)
+   * sickness: dobrowolna chorobowa 2,45%; pit2: −300 zł; KUP 20%
+   */
+  function zlecenie(p) {
+    const gross = gr(Number(p.gross) || 0);
+    const st = p.status;
+    let pension = 0, disability = 0, sickness = 0;
+    if (st === "under26" || st === "only") {
+      pension = gr(gross * R.pension);
+      disability = gr(gross * R.disability);
+      if (p.sickness) sickness = gr(gross * R.sickness);
+    }
+    const social = gr(pension + disability + sickness);
+    const health = st === "student26" ? 0 : gr((gross - social) * R.health);
+    const kup = st === "student26" || st === "under26" ? 0 : gr((gross - social) * 0.2);
+    const taxBase = st === "etat" || st === "only" ? Math.max(0, zl(gross - social - kup)) : 0;
+    const pit = taxBase ? Math.max(0, zl(taxBase * R.pit - (p.pit2 ? R.pit2 : 0))) : 0;
+    const net = gr(gross - social - health - pit);
+    return { gross, pension, disability, sickness, social, health, kup, taxBase, pit, net };
+  }
+
+  // ---------- B2B / JDG (2026) ----------
+  const ZUS_JDG = {
+    big: { base: 5652, pension: 1103.27, disability: 452.16, sickness: 138.47, accident: 94.39, fp: 138.47 },
+    pref: { base: 1441.8, pension: 281.44, disability: 115.34, sickness: 35.32, accident: 24.08, fp: 0 },
+    start: { base: 0, pension: 0, disability: 0, sickness: 0, accident: 0, fp: 0 },
+  };
+  const HEALTH_MIN = 432.54; // 9% × 4806 zł
+  const HEALTH_RYCZALT = [ { upTo: 60000, amount: 498.35 }, { upTo: 300000, amount: 830.58 }, { upTo: Infinity, amount: 1495.04 } ];
+  const LINIOWY_HEALTH_DEDUCT_MONTH = 1175; // 14 100 zł / 12
+
+  /**
+   * revenue — przychód netto (bez VAT) w miesiącu; costs — koszty miesięczne
+   * zus: "start" | "pref" | "big"; sickness: bool; form: "skala" | "liniowy" | "ryczalt"; ryczaltRate (%)
+   */
+  function b2b(p) {
+    const revenue = gr(Number(p.revenue) || 0);
+    const z = ZUS_JDG[p.zus] || ZUS_JDG.big;
+    const pension = z.pension, disability = z.disability, accident = z.accident;
+    const sickness = p.sickness ? z.sickness : 0;
+    const social = gr(pension + disability + accident + sickness);
+    const fp = z.fp; // Fundusz Pracy — koszt firmy
+    const form = p.form || "skala";
+    const costs = form === "ryczalt" ? 0 : gr((Number(p.costs) || 0) + fp);
+
+    let health, taxBase, pit;
+    if (form === "ryczalt") {
+      const yearly = revenue * 12;
+      health = HEALTH_RYCZALT.find((t) => yearly <= t.upTo).amount;
+      taxBase = Math.max(0, zl(revenue - social - gr(health * 0.5)));
+      pit = Math.max(0, zl((taxBase * (Number(p.ryczaltRate) || 12)) / 100));
+    } else {
+      const income = gr(revenue - costs);
+      const healthBase = Math.max(0, income - social);
+      health = gr(Math.max(HEALTH_MIN, healthBase * (form === "liniowy" ? 0.049 : 0.09)));
+      if (form === "liniowy") {
+        taxBase = Math.max(0, zl(income - social - Math.min(health, LINIOWY_HEALTH_DEDUCT_MONTH)));
+        pit = Math.max(0, zl(taxBase * 0.19));
+      } else {
+        taxBase = Math.max(0, zl(income - social));
+        pit = Math.max(0, zl(taxBase * R.pit - R.pit2));
+      }
+    }
+    const allCosts = form === "ryczalt" ? gr((Number(p.costs) || 0) + fp) : costs;
+    const net = gr(revenue - allCosts - social - health - pit);
+    return { revenue, costs: allCosts, fp, pension, disability, accident, sickness, social, health, taxBase, pit, net, form };
+  }
+
+  const api = { R, gr, payslip, vacationVariable, childRelief, zlecenie, b2b, ZUS_JDG, HEALTH_MIN };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.Payroll = api;
 })(typeof window !== "undefined" ? window : globalThis);

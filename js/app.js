@@ -52,7 +52,9 @@
     toast: document.getElementById("toast"),
   };
 
+  let etatNow = 1;
   let state = loadState();
+  etatNow = Number(state.etat) || 1;
   let deferredPrompt = null;
   let nominalManual = false;
 
@@ -71,6 +73,10 @@
         tax: Object.assign(defaultTax(), parsed.tax || {}),
         family: Array.isArray(parsed.family) ? parsed.family : [],
         monthData: parsed.monthData && typeof parsed.monthData === "object" ? parsed.monthData : {},
+        contract: ["uop", "uz", "b2b"].includes(parsed.contract) ? parsed.contract : "uop",
+        etat: Number(parsed.etat) || 1,
+        uz: Object.assign(defaultUz(), parsed.uz || {}),
+        b2b: Object.assign(defaultB2b(), parsed.b2b || {}),
       };
     } catch {
       return defaultState();
@@ -83,14 +89,33 @@
     return {
       salary: DEFAULT_SALARY,
       month,
-      nominalHours: PLHolidays.nominalHoursForMonth(y, m - 1),
+      nominalHours: nominalAuto(y, m - 1),
       entries: [],
       employeeName: "",
       employerName: "",
       tax: defaultTax(),
       family: [],
       monthData: {},
+      contract: "uop",
+      etat: 1,
+      uz: defaultUz(),
+      b2b: defaultB2b(),
     };
+  }
+
+  function defaultUz() {
+    return { mode: "hour", rate: 31.4, hours: 160, amount: 5000, status: "only", sickness: false, pit2: true };
+  }
+
+  function defaultB2b() {
+    return { revenue: 10000, costs: 0, zus: "big", form: "skala", rate: 12, sickness: false };
+  }
+
+  /** Godziny nominalne miesiąca z uwzględnieniem wymiaru etatu. */
+  function nominalAuto(y, monthIndex) {
+    const full = PLHolidays.nominalHoursForMonth(y, monthIndex);
+    const etat = etatNow;
+    return Math.round(full * etat * 100) / 100;
   }
 
   function defaultTax() {
@@ -250,7 +275,7 @@
   function syncNominalFromMonth(force) {
     if (nominalManual && !force) return;
     const { year, monthIndex } = parseMonth(els.month.value || state.month);
-    const auto = PLHolidays.nominalHoursForMonth(year, monthIndex);
+    const auto = nominalAuto(year, monthIndex);
     els.nominalHours.value = String(auto);
     els.nominalHint.textContent = `Wyliczone automatycznie: ${auto} h (dni robocze × 8 h)`;
     if (force) nominalManual = false;
@@ -285,7 +310,7 @@
   /** Nadgodziny miesiąca: kwota brutto i godziny (stawka liczona od pensji i godzin nominalnych tego miesiąca). */
   function overtimeFor(key) {
     const [y, m] = key.split("-").map(Number);
-    const nominal = key === state.month ? Number(state.nominalHours) || PLHolidays.nominalHoursForMonth(y, m - 1) : PLHolidays.nominalHoursForMonth(y, m - 1);
+    const nominal = key === state.month ? Number(state.nominalHours) || nominalAuto(y, m - 1) : nominalAuto(y, m - 1);
     const rate = roundGr(state.salary / (nominal || 1));
     const list = state.entries.filter((e) => e.date.startsWith(key));
     return {
@@ -332,7 +357,102 @@
       .reduce((s, [, v]) => s + (Number(v.leaveDays) || 0), 0);
   }
 
+  const CONTRACT_NAMES = { uop: "Umowa o pracę", uz: "Umowa zlecenie", b2b: "B2B (działalność gospodarcza)" };
+
+  function uzGross() {
+    const u = state.uz;
+    return u.mode === "hour" ? roundGr((Number(u.rate) || 0) * (Number(u.hours) || 0)) : roundGr(Number(u.amount) || 0);
+  }
+
+  function uzResult() {
+    const u = state.uz;
+    return Payroll.zlecenie({ gross: uzGross(), status: u.status, sickness: u.sickness, pit2: u.pit2 });
+  }
+
+  function b2bResult() {
+    const b = state.b2b;
+    return Payroll.b2b({ revenue: b.revenue, costs: b.costs, zus: b.zus, sickness: b.sickness, form: b.form, ryczaltRate: b.rate });
+  }
+
+  /** Wiersze rozliczenia dla zlecenia i B2B: [etykieta, kwota, znak] */
+  function contractLines() {
+    if (state.contract === "uz") {
+      const r = uzResult();
+      const u = state.uz;
+      const L = [[u.mode === "hour" ? `Wynagrodzenie (${formatHours(Number(u.hours) || 0)} h × ${formatMoney(Number(u.rate) || 0)})` : "Wynagrodzenie z umowy", r.gross, "="]];
+      if (r.pension) L.push(["Składka emerytalna 9,76%", r.pension, "−"]);
+      if (r.disability) L.push(["Składka rentowa 1,5%", r.disability, "−"]);
+      if (r.sickness) L.push(["Składka chorobowa 2,45%", r.sickness, "−"]);
+      if (r.health) L.push(["Składka zdrowotna 9%", r.health, "−"]);
+      L.push([u.status === "etat" || u.status === "only" ? `Zaliczka PIT 12%${u.pit2 ? " (PIT-2)" : ""}` : "Zaliczka PIT — ulga dla młodych", r.pit, "−"]);
+      L.push(["Do wypłaty netto", r.net, "="]);
+      if (r.kup) L.push(["Koszty uzyskania przychodu 20%", r.kup, "i"]);
+      if (r.taxBase) L.push(["Podstawa podatku", r.taxBase, "i"]);
+      return { L, net: r.net, gross: r.gross };
+    }
+    const r = b2bResult();
+    const b = state.b2b;
+    const formName = { skala: "skala 12%", liniowy: "liniowy 19%", ryczalt: `ryczałt ${String(b.rate).replace(".", ",")}%` }[r.form];
+    const L = [["Przychód netto (bez VAT)", r.revenue, "="]];
+    if (r.costs) L.push([r.fp ? "Koszty firmy (z Funduszem Pracy)" : "Koszty firmy", r.costs, "−"]);
+    if (r.pension) L.push(["ZUS emerytalna 19,52%", r.pension, "−"]);
+    if (r.disability) L.push(["ZUS rentowa 8%", r.disability, "−"]);
+    if (r.accident) L.push(["ZUS wypadkowa 1,67%", r.accident, "−"]);
+    if (r.sickness) L.push(["ZUS chorobowa 2,45%", r.sickness, "−"]);
+    L.push([`Składka zdrowotna (${r.form === "ryczalt" ? "ryczałt — kwota stała" : r.form === "liniowy" ? "4,9% dochodu" : "9% dochodu"})`, r.health, "−"]);
+    L.push([`Zaliczka PIT — ${formName}`, r.pit, "−"]);
+    L.push(["Zostaje na rękę", r.net, "="]);
+    L.push(["Podstawa podatku", r.taxBase, "i"]);
+    return { L, net: r.net, gross: r.revenue };
+  }
+
+  function applyContractVisibility() {
+    const c = state.contract;
+    document.querySelectorAll("[data-only]").forEach((el) => {
+      el.hidden = !el.dataset.only.split(" ").includes(c);
+    });
+    document.querySelectorAll("#contractPick [data-contract]").forEach((b) => b.classList.toggle("active", b.dataset.contract === c));
+    const u = state.uz;
+    if (c === "uz") {
+      document.getElementById("uzRateRow").hidden = u.mode !== "hour";
+      document.getElementById("uzHoursRow").hidden = u.mode !== "hour";
+      document.getElementById("uzAmountRow").hidden = u.mode !== "amount";
+      document.getElementById("uzSickRow").hidden = !(u.status === "under26" || u.status === "only");
+      document.getElementById("uzPit2Row").hidden = !(u.status === "etat" || u.status === "only");
+    }
+    if (c === "b2b") document.getElementById("b2bRateRow").hidden = state.b2b.form !== "ryczalt";
+    els.printReport.classList.toggle("no-ot", c !== "uop");
+    document.getElementById("brandSub").textContent =
+      c === "uz" ? "Umowa zlecenie · netto po ZUS i podatku" : c === "b2b" ? "B2B · ile zostaje z faktury" : "Umowa o pracę · netto, nadgodziny, urlop";
+    document.getElementById("lede").textContent =
+      c === "uz"
+        ? "Stawka × godziny albo kwota z umowy — brutto i na rękę, po ZUS i podatku."
+        : c === "b2b"
+          ? "Przychód z faktur minus koszty, ZUS, zdrowotna i podatek — tyle zostaje na rękę."
+          : "Pensja, nadgodziny, premia i urlop — brutto i na rękę, po ZUS, podatku i PPK.";
+    document.getElementById("grossLabel").textContent = c === "b2b" ? "Przychód" : "Brutto";
+    document.getElementById("contractNote").textContent =
+      c === "uz"
+        ? "Na umowie zlecenie nie ma nadgodzin z Kodeksu pracy ani płatnego urlopu — płacą za każdą godzinę według stawki. Wpisz stawkę i godziny w ustawieniach."
+        : c === "b2b"
+          ? "Na B2B wystawiasz faktury: nie ma nadgodzin, urlopu ani PIT-2. Wynik to szacunek — pomija VAT, próg 32% na skali i roczne rozliczenie zdrowotnej."
+          : "";
+  }
+
   function renderPayslip() {
+    applyContractVisibility();
+    if (state.contract !== "uop") {
+      const { L, net, gross } = contractLines();
+      els.netPay.textContent = formatMoney(net);
+      els.grossPay.textContent = formatMoney(gross);
+      document.getElementById("payslipTitle").textContent = state.contract === "uz" ? "Zlecenie — od brutto do netto" : "Firma (B2B) — od przychodu do kwoty na rękę";
+      const row = (label, value, cls = "") => `<div class="${cls}"><dt>${label}</dt><dd>${value}</dd></div>`;
+      els.payslip.innerHTML = L.map(([l, v, sign]) =>
+        sign === "−" ? row(l, `−${formatMoney(v)}`, "minus") : sign === "=" ? row(l, formatMoney(v), "sum") : row(l, formatMoney(v), "info")
+      ).join("");
+      return;
+    }
+    document.getElementById("payslipTitle").textContent = "Lista płac — od brutto do netto";
     const { slip, vac } = payslipFor(state.month);
     const tx = state.tax;
     els.netPay.textContent = formatMoney(slip.net);
@@ -376,7 +496,25 @@
       : `W ${year} r. wykorzystane: ${formatHours(used)} z ${limit} dni urlopu. Premia uznaniowa nie wchodzi do wynagrodzenia urlopowego.`;
   }
 
+  function renderContractInputs() {
+    const u = state.uz, b = state.b2b;
+    const val = (id, v) => (document.getElementById(id).value = v ?? "");
+    val("etat", String(state.etat));
+    val("uzMode", u.mode); val("uzRate", u.rate); val("uzHours", u.hours); val("uzAmount", u.amount);
+    document.querySelectorAll("input[name=uzStatus]").forEach((r) => (r.checked = r.value === u.status));
+    document.getElementById("uzSick").checked = u.sickness;
+    document.getElementById("uzPit2").checked = u.pit2;
+    val("b2bRevenue", b.revenue); val("b2bCosts", b.costs || ""); val("b2bZus", b.zus); val("b2bForm", b.form); val("b2bRate", String(b.rate));
+    document.getElementById("b2bSick").checked = b.sickness;
+    const [y, m] = state.month.split("-").map(Number);
+    document.getElementById("etatHint").textContent =
+      Number(state.etat) < 1
+        ? `Godziny nominalne: ${formatHours(nominalAuto(y, m - 1))} h. Wpisz pensję za swój etat (z umowy). Na części etatu nadgodziny zaczynają się po przekroczeniu limitu z umowy (art. 151 § 5 KP).`
+        : "";
+  }
+
   function renderTax() {
+    renderContractInputs();
     const tx = state.tax;
     els.taxForm.querySelectorAll("input[name=status]").forEach((r) => (r.checked = r.value === tx.status));
     els.kup.value = String(tx.kup);
@@ -672,7 +810,7 @@
         </tbody>
       </table>
 
-      <h2 class="pr-h2">Lista płac — od brutto do netto (szacunkowo)</h2>
+      <h2 class="pr-h2">${escapeHtml(CONTRACT_NAMES[state.contract])} — rozliczenie (szacunkowo)</h2>
       <table class="pr-summary pr-pay">
         <tbody>${payslipLines()
           .map(([l, v, sign]) => `<tr class="${sign === "=" ? "pr-grand" : ""}"><th>${sign === "+" || sign === "−" ? sign + " " : ""}${escapeHtml(l)}</th><td class="num">${formatMoney(v)}</td></tr>`)
@@ -694,6 +832,7 @@
 
   /** Wiersze listy płac do wydruku i CSV: [etykieta, kwota, znak] */
   function payslipLines() {
+    if (state.contract !== "uop") return contractLines().L;
     const { slip, vac } = payslipFor(state.month);
     const tx = state.tax;
     const L = [["Pensja zasadnicza", slip.salary, ""]];
@@ -836,7 +975,7 @@
     state.salary = Number(els.salary.value) || DEFAULT_SALARY;
     state.month = els.month.value;
     state.nominalHours =
-      Number(els.nominalHours.value) || PLHolidays.nominalHoursForMonth(year, monthIndex);
+      Number(els.nominalHours.value) || nominalAuto(year, monthIndex);
     saveState();
     render();
     showToast("Ustawienia zapisane");
@@ -899,6 +1038,47 @@
   els.employerName.addEventListener("change", saveExportFields);
   // Gdy ktoś drukuje z menu przeglądarki — też pokaż aktualne zestawienie
   window.addEventListener("beforeprint", buildPrintReport);
+
+  // ---------- rodzaj umowy ----------
+
+  document.getElementById("contractPick").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-contract]");
+    if (!b) return;
+    state.contract = b.dataset.contract;
+    saveState();
+    render();
+  });
+  function onContractInput(e) {
+    const id = e.target.id, v = e.target.value, u = state.uz, b = state.b2b;
+    const num = () => Math.max(0, Number(v) || 0);
+    if (id === "etat") {
+      state.etat = Number(v) || 1;
+      etatNow = state.etat;
+      nominalManual = false;
+      syncNominalFromMonth(true);
+      state.nominalHours = Number(els.nominalHours.value);
+    } else if (id === "uzMode") u.mode = v;
+    else if (id === "uzRate") u.rate = num();
+    else if (id === "uzHours") u.hours = num();
+    else if (id === "uzAmount") u.amount = num();
+    else if (e.target.name === "uzStatus") u.status = v;
+    else if (id === "uzSick") u.sickness = e.target.checked;
+    else if (id === "uzPit2") u.pit2 = e.target.checked;
+    else if (id === "b2bRevenue") b.revenue = num();
+    else if (id === "b2bCosts") b.costs = num();
+    else if (id === "b2bZus") b.zus = v;
+    else if (id === "b2bForm") b.form = v;
+    else if (id === "b2bRate") b.rate = Number(v) || 12;
+    else if (id === "b2bSick") b.sickness = e.target.checked;
+    else return false;
+    saveState();
+    render();
+    return true;
+  }
+  els.settingsForm.addEventListener("change", onContractInput);
+  els.taxForm.addEventListener("change", (e) => {
+    if (onContractInput(e)) showToast("Zapisano");
+  });
 
   // ---------- ten miesiąc, podatki, rodzina ----------
 

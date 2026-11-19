@@ -26,7 +26,7 @@
       <span class="brand-mark" aria-hidden="true"></span>
       <div>
         <p class="brand-name">Twoja wypłata</p>
-        <p class="brand-sub">Umowa o pracę · netto, nadgodziny, urlop</p>
+        <p class="brand-sub" id="brandSub">Umowa o pracę · netto, nadgodziny, urlop</p>
       </div>
     </div>
     <button type="button" id="installBtn" class="btn ghost install-btn" hidden>Zainstaluj</button>
@@ -36,15 +36,15 @@
     <section class="hero panel" aria-labelledby="summaryTitle">
       <p class="eyebrow" id="monthLabel">Marzec 2026</p>
       <h1 id="summaryTitle">Twoja wypłata</h1>
-      <p class="lede">Pensja, nadgodziny, premia i urlop — brutto i na rękę, po ZUS, podatku i PPK.</p>
+      <p class="lede" id="lede">Pensja, nadgodziny, premia i urlop — brutto i na rękę, po ZUS, podatku i PPK.</p>
 
       <div class="totals" role="group" aria-label="Podsumowanie miesiąca">
         <div class="total-card primary">
           <span class="total-label">Na rękę (netto)</span>
           <strong id="netPay" class="total-value">0,00 zł</strong>
-          <span class="total-sub">Brutto: <b id="grossPay">0,00 zł</b></span>
+          <span class="total-sub"><span id="grossLabel">Brutto</span>: <b id="grossPay">0,00 zł</b></span>
         </div>
-        <div class="total-grid">
+        <div class="total-grid" data-only="uop">
           <div>
             <span class="total-label">Nadgodziny brutto</span>
             <strong id="totalPay">0,00 zł</strong>
@@ -63,10 +63,10 @@
           </div>
         </div>
         <div class="breakdown" aria-label="Lista płac">
-          <p class="breakdown-title">Lista płac — od brutto do netto</p>
+          <p class="breakdown-title" id="payslipTitle">Lista płac — od brutto do netto</p>
           <dl id="payslip"></dl>
         </div>
-        <div class="breakdown" aria-label="Rozbicie wypłaty za nadgodziny">
+        <div class="breakdown" aria-label="Rozbicie wypłaty za nadgodziny" data-only="uop">
           <p class="breakdown-title">Nadgodziny — rozbicie</p>
           <dl id="breakdown"></dl>
         </div>
@@ -80,8 +80,56 @@
       </div>
 
       <form id="settingsForm" class="form-grid">
-        <label>
-          <span>Pensja miesięczna brutto (zł)</span>
+        <fieldset class="full contract-pick">
+          <legend>Rodzaj umowy</legend>
+          <div class="seg" id="contractPick">
+            <button type="button" data-contract="uop">Umowa o pracę</button>
+            <button type="button" data-contract="uz">Umowa zlecenie</button>
+            <button type="button" data-contract="b2b">B2B (firma)</button>
+          </div>
+        </fieldset>
+        <label data-only="uop">
+          <span>Wymiar etatu</span>
+          <select id="etat">
+            <option value="1">Pełny etat (1/1)</option>
+            <option value="0.875">7/8 etatu</option>
+            <option value="0.75">3/4 etatu</option>
+            <option value="0.5">1/2 etatu</option>
+            <option value="0.25">1/4 etatu</option>
+          </select>
+          <small id="etatHint"></small>
+        </label>
+        <label data-only="uz">
+          <span>Jak płacą za zlecenie?</span>
+          <select id="uzMode">
+            <option value="hour">Stawka za godzinę</option>
+            <option value="amount">Kwota za miesiąc</option>
+          </select>
+        </label>
+        <label data-only="uz" id="uzRateRow">
+          <span>Stawka brutto za godzinę (zł)</span>
+          <input type="number" id="uzRate" min="0" step="0.01" inputmode="decimal" />
+          <small>Minimum w 2026 r.: 31,40 zł brutto za godzinę.</small>
+        </label>
+        <label data-only="uz" id="uzHoursRow">
+          <span>Godziny w miesiącu</span>
+          <input type="number" id="uzHours" min="0" step="0.5" inputmode="decimal" />
+        </label>
+        <label data-only="b2b">
+          <span>Przychód netto w miesiącu (bez VAT, zł)</span>
+          <input type="number" id="b2bRevenue" min="0" step="0.01" inputmode="decimal" />
+        </label>
+        <label data-only="b2b">
+          <span>Koszty firmy w miesiącu (zł)</span>
+          <input type="number" id="b2bCosts" min="0" step="0.01" inputmode="decimal" />
+          <small>Np. leasing, telefon, księgowa. Na ryczałcie koszty nie zmniejszają podatku.</small>
+        </label>
+        <label data-only="uz" id="uzAmountRow">
+          <span>Kwota brutto za miesiąc (zł)</span>
+          <input type="number" id="uzAmount" min="0" step="0.01" inputmode="decimal" />
+        </label>
+        <label data-only="uop">
+          <span id="salaryLabel">Pensja miesięczna brutto (zł)</span>
           <input type="number" id="salary" name="salary" min="1" step="0.01" value="5265" required />
         </label>
         <div class="month-field">
@@ -92,7 +140,7 @@
           </div>
           <input type="hidden" id="month" name="month" />
         </div>
-        <label>
+        <label data-only="uop">
           <span>Godziny nominalne w miesiącu</span>
           <input type="number" id="nominalHours" name="nominalHours" min="1" step="1" required />
           <small id="nominalHint">Wyliczone automatycznie (dni robocze × 8 h)</small>
@@ -101,7 +149,7 @@
       </form>
     </section>
 
-    <section class="panel" aria-labelledby="monthTitle">
+    <section class="panel" aria-labelledby="monthTitle" data-only="uop">
       <div class="section-head">
         <h2 id="monthTitle">Ten miesiąc</h2>
         <p>Premia i urlop w wybranym miesiącu.</p>
@@ -125,22 +173,61 @@
         <p>Od tych ustawień zależy kwota na rękę.</p>
       </div>
       <form id="taxForm" class="form-grid" autocomplete="off">
-        <fieldset class="full radios">
+        <fieldset class="full radios" data-only="uz">
+          <legend>Twój status na zleceniu</legend>
+          <label class="radio"><input type="radio" name="uzStatus" value="student26" /><b>Uczeń / student do 26 lat</b><small>Bez ZUS i bez podatku — dostajesz całe brutto.</small></label>
+          <label class="radio"><input type="radio" name="uzStatus" value="under26" /><b>Do 26 lat, nie uczę się</b><small>ZUS i zdrowotna, bez podatku (ulga dla młodych).</small></label>
+          <label class="radio"><input type="radio" name="uzStatus" value="etat" /><b>Mam etat w innej firmie (min. 4806 zł brutto)</b><small>Tylko zdrowotna i podatek.</small></label>
+          <label class="radio"><input type="radio" name="uzStatus" value="only" /><b>26+ i zlecenie to moja jedyna praca</b><small>Pełny ZUS, zdrowotna i podatek.</small></label>
+        </fieldset>
+        <label class="check full" data-only="uz" id="uzSickRow"><input type="checkbox" id="uzSick" /><span>Płacę dobrowolną składkę chorobową (2,45%)</span></label>
+        <label class="check full" data-only="uz" id="uzPit2Row"><input type="checkbox" id="uzPit2" /><span>Złożony PIT-2 u zleceniodawcy (−300 zł podatku miesięcznie)</span></label>
+
+        <label data-only="b2b">
+          <span>Składki ZUS w firmie</span>
+          <select id="b2bZus">
+            <option value="start">Ulga na start (pierwsze 6 miesięcy) — tylko zdrowotna</option>
+            <option value="pref">Preferencyjny ZUS (kolejne 24 miesiące)</option>
+            <option value="big">Pełny (duży) ZUS</option>
+          </select>
+        </label>
+        <label data-only="b2b">
+          <span>Forma opodatkowania</span>
+          <select id="b2bForm">
+            <option value="skala">Skala podatkowa 12% (kwota wolna 30 000 zł)</option>
+            <option value="liniowy">Podatek liniowy 19%</option>
+            <option value="ryczalt">Ryczałt od przychodu</option>
+          </select>
+        </label>
+        <label data-only="b2b" id="b2bRateRow">
+          <span>Stawka ryczałtu (%)</span>
+          <select id="b2bRate">
+            <option value="8.5">8,5% — np. usługi, transport osób</option>
+            <option value="12">12% — usługi IT (programowanie)</option>
+            <option value="14">14% — np. doradztwo, usługi specjalistyczne</option>
+            <option value="15">15% — np. pośrednictwo, reklama</option>
+            <option value="5.5">5,5% — np. budownictwo, transport towarów</option>
+            <option value="3">3% — handel, gastronomia</option>
+          </select>
+        </label>
+        <label class="check full" data-only="b2b" id="b2bSickRow"><input type="checkbox" id="b2bSick" /><span>Płacę dobrowolną składkę chorobową (2,45%)</span></label>
+
+        <fieldset class="full radios" data-only="uop">
           <legend>Twój status</legend>
           <label class="radio"><input type="radio" name="status" value="student26" /><b>Do 26 lat, uczę się (student / uczeń)</b><small>Bez podatku (ulga dla młodych). ZUS jak zwykle.</small></label>
           <label class="radio"><input type="radio" name="status" value="under26" /><b>Do 26 lat, nie uczę się</b><small>Bez podatku (ulga dla młodych). ZUS jak zwykle.</small></label>
           <label class="radio"><input type="radio" name="status" value="26plus" /><b>26 lat i więcej</b><small>ZUS, składka zdrowotna i podatek.</small></label>
           <small class="note full">Na umowie o pracę status studenta nie zwalnia ze składek ZUS — liczy się tylko wiek (ulga dla młodych do 85 528 zł rocznie).</small>
         </fieldset>
-        <label>
+        <label data-only="uop">
           <span>Koszty uzyskania przychodu</span>
           <select id="kup">
             <option value="250">250 zł — pracuję w miejscu zamieszkania</option>
             <option value="300">300 zł — dojeżdżam z innej miejscowości</option>
           </select>
         </label>
-        <label class="check"><input type="checkbox" id="pit2" /><span>Złożony PIT-2 u pracodawcy (−300 zł podatku miesięcznie)</span></label>
-        <label class="check full"><input type="checkbox" id="ppkOn" /><span>Należę do PPK</span></label>
+        <label class="check" data-only="uop"><input type="checkbox" id="pit2" /><span>Złożony PIT-2 u pracodawcy (−300 zł podatku miesięcznie)</span></label>
+        <label class="check full" data-only="uop"><input type="checkbox" id="ppkOn" /><span>Należę do PPK</span></label>
         <label id="ppkEmpRow">
           <span>PPK — moja wpłata (%)</span>
           <input type="number" id="ppkEmp" min="0.5" max="4" step="0.5" inputmode="decimal" />
@@ -150,7 +237,7 @@
           <input type="number" id="ppkEr" min="1.5" max="4" step="0.5" inputmode="decimal" />
           <small>Wpłata pracodawcy nie zmniejsza pensji, ale zwiększa podatek.</small>
         </label>
-        <label>
+        <label data-only="uop">
           <span>Urlop w roku (dni)</span>
           <select id="leaveLimit">
             <option value="20">20 dni — staż pracy poniżej 10 lat</option>
@@ -183,7 +270,9 @@
       <p class="type-preview" id="familyInfo"></p>
     </section>
 
-    <section class="panel" aria-labelledby="addTitle">
+    <p class="panel contract-note" id="contractNote" data-only="uz b2b"></p>
+
+    <section class="panel" aria-labelledby="addTitle" data-only="uop">
       <div class="section-head">
         <h2 id="addTitle">Dodaj nadgodziny</h2>
         <p>Typ dopłaty ustawi się sam według dnia tygodnia i świąt.</p>
@@ -215,7 +304,7 @@
       </form>
     </section>
 
-    <section class="panel" aria-labelledby="listTitle">
+    <section class="panel" aria-labelledby="listTitle" data-only="uop">
       <div class="section-head row">
         <div>
           <h2 id="listTitle">Lista wpisów</h2>
