@@ -1,4 +1,4 @@
-const CACHE = "twoja-wyplata-v7";
+const CACHE = "twoja-wyplata-v8";
 const ASSETS = [
   "./",
   "./index.html",
@@ -31,7 +31,7 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   // Najpierw sieć (świeża wersja po aktualizacji), bez internetu — kopia z pamięci
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: "no-cache" })
       .then((response) => {
         if (response && response.status === 200 && response.type === "basic") {
           const copy = response.clone();
@@ -40,7 +40,7 @@ self.addEventListener("fetch", (event) => {
         return response;
       })
       .catch(() =>
-        caches.match(event.request).then((cached) => cached || caches.match("./index.html"))
+        caches.match(event.request, { ignoreSearch: true }).then((cached) => cached || caches.match("./index.html"))
       )
   );
 });
