@@ -30,6 +30,25 @@
     monthSel: document.getElementById("monthSel"),
     yearSel: document.getElementById("yearSel"),
     breakdown: document.getElementById("breakdown"),
+    payslip: document.getElementById("payslip"),
+    netPay: document.getElementById("netPay"),
+    grossPay: document.getElementById("grossPay"),
+    leaveLeft: document.getElementById("leaveLeft"),
+    premia: document.getElementById("premia"),
+    leaveDays: document.getElementById("leaveDays"),
+    leaveInfo: document.getElementById("leaveInfo"),
+    taxForm: document.getElementById("taxForm"),
+    kup: document.getElementById("kup"),
+    pit2: document.getElementById("pit2"),
+    ppkOn: document.getElementById("ppkOn"),
+    ppkEmp: document.getElementById("ppkEmp"),
+    ppkEr: document.getElementById("ppkEr"),
+    leaveLimit: document.getElementById("leaveLimit"),
+    familyList: document.getElementById("familyList"),
+    familyForm: document.getElementById("familyForm"),
+    familyName: document.getElementById("familyName"),
+    familyType: document.getElementById("familyType"),
+    familyInfo: document.getElementById("familyInfo"),
     toast: document.getElementById("toast"),
   };
 
@@ -49,6 +68,9 @@
         entries: Array.isArray(parsed.entries) ? parsed.entries : [],
         employeeName: typeof parsed.employeeName === "string" ? parsed.employeeName : "",
         employerName: typeof parsed.employerName === "string" ? parsed.employerName : "",
+        tax: Object.assign(defaultTax(), parsed.tax || {}),
+        family: Array.isArray(parsed.family) ? parsed.family : [],
+        monthData: parsed.monthData && typeof parsed.monthData === "object" ? parsed.monthData : {},
       };
     } catch {
       return defaultState();
@@ -65,7 +87,14 @@
       entries: [],
       employeeName: "",
       employerName: "",
+      tax: defaultTax(),
+      family: [],
+      monthData: {},
     };
+  }
+
+  function defaultTax() {
+    return { status: "26plus", kup: 250, pit2: true, ppkOn: false, ppkEmp: 2, ppkEr: 1.5, leaveLimit: 26 };
   }
 
   function saveState() {
@@ -238,7 +267,154 @@
     els.typePreview.textContent = `${formatDateLabel(date)} · ${resolved.reason}`;
   }
 
+  // ---------- lista płac ----------
+
+  const LEAVE_DAY_HOURS = 8;
+  const pct = (v) => String(Number(v) || 0).replace(".", ",");
+
+  function monthInfo(key) {
+    return Object.assign({ premia: 0, leaveDays: 0 }, state.monthData[key] || {});
+  }
+
+  function shiftMonth(key, delta) {
+    const [y, m] = key.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  /** Nadgodziny miesiąca: kwota brutto i godziny (stawka liczona od pensji i godzin nominalnych tego miesiąca). */
+  function overtimeFor(key) {
+    const [y, m] = key.split("-").map(Number);
+    const nominal = key === state.month ? Number(state.nominalHours) || PLHolidays.nominalHoursForMonth(y, m - 1) : PLHolidays.nominalHoursForMonth(y, m - 1);
+    const rate = roundGr(state.salary / (nominal || 1));
+    const list = state.entries.filter((e) => e.date.startsWith(key));
+    return {
+      nominal,
+      pay: roundGr(list.reduce((s, e) => s + payForEntry(e, rate), 0)),
+      hours: list.reduce((s, e) => s + e.hours, 0),
+    };
+  }
+
+  /** Składniki zmienne do urlopu: nadgodziny z 3 poprzednich miesięcy / godziny przepracowane. */
+  function vacationFor(key) {
+    const info = monthInfo(key);
+    const hours = (Number(info.leaveDays) || 0) * LEAVE_DAY_HOURS;
+    if (!hours) return { rate: 0, amount: 0, hours: 0 };
+    const history = [1, 2, 3].map((i) => {
+      const k = shiftMonth(key, -i);
+      const ot = overtimeFor(k);
+      const leaveH = (Number(monthInfo(k).leaveDays) || 0) * LEAVE_DAY_HOURS;
+      return { variable: ot.pay, hoursWorked: Math.max(0, ot.nominal - leaveH) + ot.hours };
+    });
+    return { ...Payroll.vacationVariable(history, hours), hours };
+  }
+
+  function payslipFor(key) {
+    const tx = state.tax;
+    const ot = overtimeFor(key);
+    const vac = vacationFor(key);
+    const slip = Payroll.payslip({
+      salary: state.salary,
+      overtimePay: ot.pay,
+      premia: monthInfo(key).premia,
+      vacationVariable: vac.amount,
+      age: tx.status === "26plus" ? "26plus" : "under26",
+      kup: Number(tx.kup) || 250,
+      pit2: tx.pit2,
+      ppk: { on: tx.ppkOn, emp: tx.ppkEmp, er: tx.ppkEr },
+    });
+    return { slip, vac };
+  }
+
+  function leaveUsedInYear(year) {
+    return Object.entries(state.monthData)
+      .filter(([k]) => k.startsWith(`${year}-`))
+      .reduce((s, [, v]) => s + (Number(v.leaveDays) || 0), 0);
+  }
+
+  function renderPayslip() {
+    const { slip, vac } = payslipFor(state.month);
+    const tx = state.tax;
+    els.netPay.textContent = formatMoney(slip.net);
+    els.grossPay.textContent = formatMoney(slip.gross);
+
+    const row = (label, value, cls = "") => `<div class="${cls}"><dt>${label}</dt><dd>${value}</dd></div>`;
+    const minus = (label, v) => row(label, `−${formatMoney(v)}`, "minus");
+    const lines = [row("Pensja zasadnicza", formatMoney(slip.salary))];
+    if (slip.overtime) lines.push(row("+ Nadgodziny (z dodatkami)", formatMoney(slip.overtime), "plus"));
+    if (slip.premia) lines.push(row("+ Premia uznaniowa", formatMoney(slip.premia), "plus"));
+    if (slip.vacation) lines.push(row(`+ Urlop — składniki zmienne (${formatHours(vac.hours)} h × ${formatMoney(vac.rate)})`, formatMoney(slip.vacation), "plus"));
+    lines.push(row("= Brutto", formatMoney(slip.gross), "sum"));
+    lines.push(minus("Składka emerytalna 9,76%", slip.pension));
+    lines.push(minus("Składka rentowa 1,5%", slip.disability));
+    lines.push(minus("Składka chorobowa 2,45%", slip.sickness));
+    lines.push(minus("Składka zdrowotna 9%", slip.health));
+    if (tx.status === "26plus") {
+      lines.push(minus(`Zaliczka PIT 12%${tx.pit2 ? " (z PIT-2: −300 zł)" : " (bez PIT-2)"}`, slip.pit));
+    } else {
+      lines.push(row("Zaliczka PIT — ulga dla młodych", formatMoney(0)));
+    }
+    if (tx.ppkOn) lines.push(minus(`PPK — Twoja wpłata ${pct(tx.ppkEmp)}%`, slip.ppkEmp));
+    lines.push(row("= Na rękę (netto)", formatMoney(slip.net), "sum"));
+    lines.push(row(`Koszty uzyskania przychodu`, formatMoney(slip.kup), "info"));
+    lines.push(row(`Podstawa podatku`, formatMoney(slip.taxBase), "info"));
+    if (tx.ppkOn) lines.push(row(`PPK — wpłata pracodawcy ${pct(tx.ppkEr)}% (na Twoje konto PPK)`, formatMoney(slip.ppkEr), "info"));
+    els.payslip.innerHTML = lines.join("");
+
+    const year = state.month.slice(0, 4);
+    const used = leaveUsedInYear(year);
+    const limit = Number(tx.leaveLimit) || 26;
+    els.leaveLeft.textContent = `${formatHours(limit - used)} / ${limit} dni`;
+
+    const info = monthInfo(state.month);
+    els.premia.value = info.premia || "";
+    els.leaveDays.value = info.leaveDays || "";
+    els.leaveInfo.textContent = info.leaveDays
+      ? `Urlop: ${formatHours(Number(info.leaveDays))} dni (${formatHours(vac.hours)} h). Pensja zasadnicza bez zmian` +
+        (vac.amount ? ` + ${formatMoney(vac.amount)} za nadgodziny ze średniej 3 miesięcy.` : ". Brak nadgodzin w 3 poprzednich miesiącach — nic nie dochodzi.") +
+        ` W ${year} r. wykorzystane: ${formatHours(used)} z ${limit} dni.`
+      : `W ${year} r. wykorzystane: ${formatHours(used)} z ${limit} dni urlopu. Premia uznaniowa nie wchodzi do wynagrodzenia urlopowego.`;
+  }
+
+  function renderTax() {
+    const tx = state.tax;
+    els.taxForm.querySelectorAll("input[name=status]").forEach((r) => (r.checked = r.value === tx.status));
+    els.kup.value = String(tx.kup);
+    els.pit2.checked = tx.pit2;
+    els.pit2.closest("label").hidden = tx.status !== "26plus";
+    els.ppkOn.checked = tx.ppkOn;
+    els.ppkEmp.value = tx.ppkEmp;
+    els.ppkEr.value = tx.ppkEr;
+    document.getElementById("ppkEmpRow").hidden = !tx.ppkOn;
+    document.getElementById("ppkErRow").hidden = !tx.ppkOn;
+    els.leaveLimit.value = String(tx.leaveLimit);
+  }
+
+  function renderFamily() {
+    const kids = state.family.filter((f) => f.type === "child").length;
+    els.familyList.innerHTML = state.family.length
+      ? state.family
+          .map(
+            (f) => `<li><div><div class="who">${escapeHtml(f.name || (f.type === "child" ? "Dziecko" : "Dorosły"))}</div>
+              <div class="kind">${f.type === "child" ? "Dziecko" : "Dorosły członek rodziny"}</div></div>
+              <button type="button" class="btn ghost danger" data-family-del="${f.id}">Usuń</button></li>`
+          )
+          .join("")
+      : `<li class="empty">Nikt nie jest dopisany.</li>`;
+    let txt =
+      "Zgłoszenie rodziny do ZUS nie zmienia Twojej pensji ani składki zdrowotnej — płacisz tyle samo, a rodzina ma prawo do leczenia w NFZ.";
+    if (kids) {
+      const relief = Payroll.childRelief(kids);
+      txt += ` Ulga na ${kids === 1 ? "1 dziecko" : `${kids} dzieci`} w rocznym PIT za ${state.month.slice(0, 4)} r.: do ${formatMoney(relief)} zwrotu (przy 1 dziecku limit dochodu 112 000 zł dla małżonków, 56 000 zł dla samotnych; ulgę można podzielić między rodziców).`;
+    }
+    txt += " Dziecko uczące się może być dopisane do 26 lat.";
+    els.familyInfo.textContent = txt;
+  }
+
   function render() {
+    renderPayslip();
+    renderTax();
+    renderFamily();
     const rate = hourlyRate();
     const monthEntries = entriesForMonth();
     const totalHours = monthEntries.reduce((s, e) => s + e.hours, 0);
@@ -437,7 +613,7 @@
 
     els.printReport.innerHTML = `
       <header class="pr-head">
-        <h1>Zestawienie nadgodzin</h1>
+        <h1>Twoja wypłata — zestawienie</h1>
         <p class="pr-sub">${escapeHtml(title)}</p>
       </header>
 
@@ -496,6 +672,13 @@
         </tbody>
       </table>
 
+      <h2 class="pr-h2">Lista płac — od brutto do netto (szacunkowo)</h2>
+      <table class="pr-summary pr-pay">
+        <tbody>${payslipLines()
+          .map(([l, v, sign]) => `<tr class="${sign === "=" ? "pr-grand" : ""}"><th>${sign === "+" || sign === "−" ? sign + " " : ""}${escapeHtml(l)}</th><td class="num">${formatMoney(v)}</td></tr>`)
+          .join("")}</tbody>
+      </table>
+
       <div class="pr-sign">
         <div><span></span>Podpis pracownika</div>
         <div><span></span>Podpis przełożonego</div>
@@ -503,10 +686,30 @@
 
       <footer class="pr-foot">
         <p>Stawka godzinowa = pensja brutto ÷ godziny nominalne miesiąca (do 1 grosza). Podstawa = godziny × stawka. Dodatek = godziny × 50% lub 100% stawki (do 1 grosza). Razem = podstawa + dodatek (art. 151¹ Kodeksu pracy).</p>
-        <p>Zestawienie pomocnicze — ostateczne rozliczenie zależy od grafiku i regulaminu pracodawcy. Wygenerowano: ${escapeHtml(generated)} · Nadgodziny PL</p>
+        <p>Zestawienie pomocnicze — ostateczne rozliczenie zależy od grafiku i regulaminu pracodawcy. Wygenerowano: ${escapeHtml(generated)} · Twoja wypłata</p>
       </footer>
     `;
     return data;
+  }
+
+  /** Wiersze listy płac do wydruku i CSV: [etykieta, kwota, znak] */
+  function payslipLines() {
+    const { slip, vac } = payslipFor(state.month);
+    const tx = state.tax;
+    const L = [["Pensja zasadnicza", slip.salary, ""]];
+    if (slip.overtime) L.push(["Nadgodziny (z dodatkami)", slip.overtime, "+"]);
+    if (slip.premia) L.push(["Premia uznaniowa", slip.premia, "+"]);
+    if (slip.vacation) L.push([`Urlop — składniki zmienne (${formatHours(vac.hours)} h)`, slip.vacation, "+"]);
+    L.push(["Wynagrodzenie brutto", slip.gross, "="]);
+    L.push(["Składka emerytalna 9,76%", slip.pension, "−"]);
+    L.push(["Składka rentowa 1,5%", slip.disability, "−"]);
+    L.push(["Składka chorobowa 2,45%", slip.sickness, "−"]);
+    L.push(["Składka zdrowotna 9%", slip.health, "−"]);
+    L.push([tx.status === "26plus" ? `Zaliczka PIT 12%${tx.pit2 ? " (PIT-2)" : ""}` : "Zaliczka PIT (ulga dla młodych)", slip.pit, "−"]);
+    if (tx.ppkOn) L.push([`PPK — wpłata pracownika ${pct(tx.ppkEmp)}%`, slip.ppkEmp, "−"]);
+    L.push(["Do wypłaty netto", slip.net, "="]);
+    if (tx.ppkOn) L.push([`PPK — wpłata pracodawcy ${pct(tx.ppkEr)}% (doliczona do podstawy PIT)`, slip.ppkEr, "i"]);
+    return L;
   }
 
   function csvCell(value) {
@@ -547,6 +750,9 @@
     add("Dodatek 50%", formatNumberPl(data.hours50), formatNumberPl(data.bonus50));
     add("Dodatek 100%", formatNumberPl(data.hours100), formatNumberPl(data.bonus100));
     add("Łącznie do wypłaty", formatNumberPl(data.totalHours), formatNumberPl(data.totalPay));
+    add();
+    add("Lista płac (szacunkowo)", "Kwota (zł)");
+    payslipLines().forEach(([l, v, sign]) => add(`${sign === "+" || sign === "−" ? sign + " " : ""}${l}`, formatNumberPl(v)));
 
     // BOM, żeby Excel poprawnie pokazał polskie znaki
     return { text: "﻿" + lines.join("\r\n"), count: data.rows.length };
@@ -554,12 +760,8 @@
 
   async function downloadCsv() {
     saveExportFields();
-    const { text, count } = buildCsv();
-    if (!count) {
-      showToast("Brak wpisów w tym miesiącu do eksportu");
-      return;
-    }
-    const filename = `nadgodziny-${state.month}.csv`;
+    const { text } = buildCsv();
+    const filename = `wyplata-${state.month}.csv`;
     const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
 
     // W aplikacji zainstalowanej na iPhonie pobieranie bywa zablokowane — użyj udostępniania
@@ -567,7 +769,7 @@
       try {
         const file = new File([blob], filename, { type: "text/csv" });
         if (navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: "Zestawienie nadgodzin" });
+          await navigator.share({ files: [file], title: "Twoja wypłata" });
           return;
         }
       } catch (err) {
@@ -588,11 +790,7 @@
 
   function printReport() {
     saveExportFields();
-    const data = buildPrintReport();
-    if (!data.rows.length) {
-      showToast("Brak wpisów w tym miesiącu do wydruku");
-      return;
-    }
+    buildPrintReport();
     window.print();
   }
 
@@ -701,6 +899,53 @@
   els.employerName.addEventListener("change", saveExportFields);
   // Gdy ktoś drukuje z menu przeglądarki — też pokaż aktualne zestawienie
   window.addEventListener("beforeprint", buildPrintReport);
+
+  // ---------- ten miesiąc, podatki, rodzina ----------
+
+  function setMonthInfo(field, value) {
+    const cur = monthInfo(state.month);
+    cur[field] = Math.max(0, Number(value) || 0);
+    state.monthData[state.month] = cur;
+    saveState();
+    render();
+  }
+  els.premia.addEventListener("change", () => setMonthInfo("premia", els.premia.value));
+  els.leaveDays.addEventListener("change", () => {
+    const max = Number(state.tax.leaveLimit) || 26;
+    setMonthInfo("leaveDays", Math.min(31, Number(els.leaveDays.value) || 0));
+    if (leaveUsedInYear(state.month.slice(0, 4)) > max) showToast("Uwaga: więcej dni urlopu niż przysługuje w roku");
+  });
+
+  els.taxForm.addEventListener("change", (e) => {
+    const tx = state.tax;
+    if (e.target.name === "status") tx.status = e.target.value;
+    else if (e.target === els.kup) tx.kup = Number(els.kup.value);
+    else if (e.target === els.pit2) tx.pit2 = els.pit2.checked;
+    else if (e.target === els.ppkOn) tx.ppkOn = els.ppkOn.checked;
+    else if (e.target === els.ppkEmp) tx.ppkEmp = Math.min(4, Math.max(0.5, Number(els.ppkEmp.value) || 2));
+    else if (e.target === els.ppkEr) tx.ppkEr = Math.min(4, Math.max(1.5, Number(els.ppkEr.value) || 1.5));
+    else if (e.target === els.leaveLimit) tx.leaveLimit = Number(els.leaveLimit.value);
+    else return;
+    saveState();
+    render();
+    showToast("Zapisano");
+  });
+
+  els.familyForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    state.family.push({ id: uid(), name: els.familyName.value.trim(), type: els.familyType.value });
+    els.familyName.value = "";
+    saveState();
+    render();
+    showToast("Dodano osobę");
+  });
+  els.familyList.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-family-del]");
+    if (!b) return;
+    state.family = state.family.filter((f) => f.id !== b.dataset.familyDel);
+    saveState();
+    render();
+  });
 
   const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const isStandalone =

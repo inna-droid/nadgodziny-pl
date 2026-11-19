@@ -1,7 +1,7 @@
 {
-  "name": "Nadgodziny PL",
-  "short_name": "Nadgodziny",
-  "description": "Kalkulator nadgodzin według Kodeksu pracy — umowa o pracę w Polsce.",
+  "name": "Twoja wypłata",
+  "short_name": "Twoja wypłata",
+  "description": "Pensja netto, nadgodziny, premia, urlop i PPK na umowie o pracę.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

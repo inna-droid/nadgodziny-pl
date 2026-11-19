@@ -1,10 +1,11 @@
-const CACHE = "nadgodziny-pl-v3";
+const CACHE = "twoja-wyplata-v4";
 const ASSETS = [
   "./",
   "./index.html",
   "./css/styles.css",
   "./js/app.js",
   "./js/holidays.js",
+  "./js/payroll.js",
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/icon-192.png",

@@ -4,11 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0f3d36" />
-  <meta name="description" content="Kalkulator nadgodzin według Kodeksu pracy — umowa o pracę w Polsce." />
+  <meta name="description" content="Twoja wypłata — pensja netto, nadgodziny, premia, urlop i PPK na umowie o pracę w Polsce." />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Nadgodziny" />
+  <meta name="apple-mobile-web-app-title" content="Twoja wypłata" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,500;7..72,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
-  <title>Nadgodziny PL</title>
+  <title>Twoja wypłata</title>
 </head>
 <body>
   <div class="bg" aria-hidden="true"></div>
@@ -25,8 +25,8 @@
     <div class="brand">
       <span class="brand-mark" aria-hidden="true"></span>
       <div>
-        <p class="brand-name">Nadgodziny PL</p>
-        <p class="brand-sub">Umowa o pracę · Kodeks pracy</p>
+        <p class="brand-name">Twoja wypłata</p>
+        <p class="brand-sub">Umowa o pracę · netto, nadgodziny, urlop</p>
       </div>
     </div>
     <button type="button" id="installBtn" class="btn ghost install-btn" hidden>Zainstaluj</button>
@@ -35,26 +35,39 @@
   <main>
     <section class="hero panel" aria-labelledby="summaryTitle">
       <p class="eyebrow" id="monthLabel">Marzec 2026</p>
-      <h1 id="summaryTitle">Twoje nadgodziny</h1>
-      <p class="lede">Dopłata 50% w dni powszednie, 100% w weekendy i święta — od pensji miesięcznej brutto.</p>
+      <h1 id="summaryTitle">Twoja wypłata</h1>
+      <p class="lede">Pensja, nadgodziny, premia i urlop — brutto i na rękę, po ZUS, podatku i PPK.</p>
 
       <div class="totals" role="group" aria-label="Podsumowanie miesiąca">
         <div class="total-card primary">
-          <span class="total-label">Do wypłaty (brutto)</span>
-          <strong id="totalPay" class="total-value">0,00 zł</strong>
+          <span class="total-label">Na rękę (netto)</span>
+          <strong id="netPay" class="total-value">0,00 zł</strong>
+          <span class="total-sub">Brutto: <b id="grossPay">0,00 zł</b></span>
         </div>
         <div class="total-grid">
           <div>
-            <span class="total-label">Godziny</span>
+            <span class="total-label">Nadgodziny brutto</span>
+            <strong id="totalPay">0,00 zł</strong>
+          </div>
+          <div>
+            <span class="total-label">Godziny nadliczbowe</span>
             <strong id="totalHours">0</strong>
           </div>
           <div>
             <span class="total-label">Stawka / h</span>
             <strong id="hourlyRate">0,00 zł</strong>
           </div>
+          <div>
+            <span class="total-label">Urlop w roku</span>
+            <strong id="leaveLeft">0</strong>
+          </div>
+        </div>
+        <div class="breakdown" aria-label="Lista płac">
+          <p class="breakdown-title">Lista płac — od brutto do netto</p>
+          <dl id="payslip"></dl>
         </div>
         <div class="breakdown" aria-label="Rozbicie wypłaty za nadgodziny">
-          <p class="breakdown-title">Rozbicie wypłaty</p>
+          <p class="breakdown-title">Nadgodziny — rozbicie</p>
           <dl id="breakdown"></dl>
         </div>
       </div>
@@ -86,6 +99,88 @@
         </label>
         <button type="submit" class="btn primary">Zapisz ustawienia</button>
       </form>
+    </section>
+
+    <section class="panel" aria-labelledby="monthTitle">
+      <div class="section-head">
+        <h2 id="monthTitle">Ten miesiąc</h2>
+        <p>Premia i urlop w wybranym miesiącu.</p>
+      </div>
+      <form id="monthForm" class="form-grid" autocomplete="off">
+        <label>
+          <span>Premia uznaniowa (zł brutto)</span>
+          <input type="number" id="premia" min="0" step="0.01" inputmode="decimal" placeholder="0" />
+        </label>
+        <label>
+          <span>Dni urlopu w tym miesiącu</span>
+          <input type="number" id="leaveDays" min="0" max="31" step="0.5" inputmode="decimal" placeholder="0" />
+        </label>
+        <p class="type-preview full" id="leaveInfo" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="taxTitle">
+      <div class="section-head">
+        <h2 id="taxTitle">Podatki i składki</h2>
+        <p>Od tych ustawień zależy kwota na rękę.</p>
+      </div>
+      <form id="taxForm" class="form-grid" autocomplete="off">
+        <fieldset class="full radios">
+          <legend>Twój status</legend>
+          <label class="radio"><input type="radio" name="status" value="student26" /><b>Do 26 lat, uczę się (student / uczeń)</b><small>Bez podatku (ulga dla młodych). ZUS jak zwykle.</small></label>
+          <label class="radio"><input type="radio" name="status" value="under26" /><b>Do 26 lat, nie uczę się</b><small>Bez podatku (ulga dla młodych). ZUS jak zwykle.</small></label>
+          <label class="radio"><input type="radio" name="status" value="26plus" /><b>26 lat i więcej</b><small>ZUS, składka zdrowotna i podatek.</small></label>
+          <small class="note full">Na umowie o pracę status studenta nie zwalnia ze składek ZUS — liczy się tylko wiek (ulga dla młodych do 85 528 zł rocznie).</small>
+        </fieldset>
+        <label>
+          <span>Koszty uzyskania przychodu</span>
+          <select id="kup">
+            <option value="250">250 zł — pracuję w miejscu zamieszkania</option>
+            <option value="300">300 zł — dojeżdżam z innej miejscowości</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="pit2" /><span>Złożony PIT-2 u pracodawcy (−300 zł podatku miesięcznie)</span></label>
+        <label class="check full"><input type="checkbox" id="ppkOn" /><span>Należę do PPK</span></label>
+        <label id="ppkEmpRow">
+          <span>PPK — moja wpłata (%)</span>
+          <input type="number" id="ppkEmp" min="0.5" max="4" step="0.5" inputmode="decimal" />
+        </label>
+        <label id="ppkErRow">
+          <span>PPK — wpłata pracodawcy (%)</span>
+          <input type="number" id="ppkEr" min="1.5" max="4" step="0.5" inputmode="decimal" />
+          <small>Wpłata pracodawcy nie zmniejsza pensji, ale zwiększa podatek.</small>
+        </label>
+        <label>
+          <span>Urlop w roku (dni)</span>
+          <select id="leaveLimit">
+            <option value="20">20 dni — staż pracy poniżej 10 lat</option>
+            <option value="26">26 dni — staż pracy 10 lat i więcej</option>
+          </select>
+        </label>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="familyTitle">
+      <div class="section-head">
+        <h2 id="familyTitle">Rodzina zgłoszona do ZUS</h2>
+        <p>Członkowie rodziny objęci Twoim ubezpieczeniem zdrowotnym.</p>
+      </div>
+      <ul id="familyList" class="family-list"></ul>
+      <form id="familyForm" class="form-grid" autocomplete="off">
+        <label>
+          <span>Imię (opcjonalnie)</span>
+          <input type="text" id="familyName" maxlength="40" placeholder="np. Mateusz" />
+        </label>
+        <label>
+          <span>Kto to jest</span>
+          <select id="familyType">
+            <option value="child">Dziecko</option>
+            <option value="adult">Dorosły (np. małżonek, rodzic)</option>
+          </select>
+        </label>
+        <button type="submit" class="btn ghost">+ Dodaj osobę</button>
+      </form>
+      <p class="type-preview" id="familyInfo"></p>
     </section>
 
     <section class="panel" aria-labelledby="addTitle">
@@ -160,6 +255,8 @@
         <li>Dzień powszedni: dodatek 50% stawki. Weekend / święto / dzień wolny: dodatek 100% stawki.</li>
         <li>Stawka dodatku jest zaokrąglana do 1 grosza — każdą kwotę można sprawdzić na kalkulatorze.</li>
         <li>Zgodnie z art. 151¹ Kodeksu pracy (umowa o pracę).</li>
+        <li>Na rękę: brutto − składki ZUS (13,71%) − zdrowotna 9% − zaliczka PIT 12% (PIT-2: −300 zł; do 26 lat: 0) − PPK.</li>
+        <li>Urlop: pensja bez zmian + nadgodziny ze średniej 3 poprzednich miesięcy (premia uznaniowa się nie wlicza).</li>
       </ul>
       <p class="disclaimer">To narzędzie pomocnicze. Ostateczne rozliczenie zależy od grafiku, godzin nocnych i regulaminu pracodawcy.</p>
     </section>
@@ -170,6 +267,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="js/holidays.js"></script>
+  <script src="js/payroll.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
