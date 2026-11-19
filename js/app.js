@@ -421,6 +421,11 @@
       if (r.health) L.push(["Składka zdrowotna 9%", r.health, "−"]);
       L.push([u.status === "etat" || u.status === "only" ? `Zaliczka PIT 12%${u.pit2 ? " (PIT-2)" : ""}` : "Zaliczka PIT — ulga dla młodych", r.pit, "−"]);
       L.push(["Do wypłaty netto", r.net, "="]);
+      const hrs = u.mode === "hour" ? Number(u.hours) || 0 : 0;
+      if (hrs) {
+        L.push(["Stawka za godzinę brutto", roundGr(r.gross / hrs), "i"]);
+        L.push(["Stawka za godzinę netto (na rękę)", roundGr(r.net / hrs), "i"]);
+      }
       if (r.kup) L.push(["Koszty uzyskania przychodu 20%", r.kup, "i"]);
       if (r.taxBase) L.push(["Podstawa podatku", r.taxBase, "i"]);
       return { L, net: r.net, gross: r.gross };
@@ -480,6 +485,10 @@
       const { L, net, gross } = contractLines();
       els.netPay.textContent = formatMoney(net);
       els.grossPay.textContent = formatMoney(gross);
+      const u = state.uz;
+      if (state.contract === "uz" && u.mode === "hour" && Number(u.hours) > 0) {
+        els.grossPay.textContent = `${formatMoney(gross)} · ${formatMoney(Number(u.rate) || 0)}/h brutto → ${formatMoney(roundGr(net / Number(u.hours)))}/h netto`;
+      }
       document.getElementById("payslipTitle").textContent = state.contract === "uz" ? "Zlecenie — od brutto do netto" : "Firma (B2B) — od przychodu do kwoty na rękę";
       const row = (label, value, cls = "") => `<div class="${cls}"><dt>${label}</dt><dd>${value}</dd></div>`;
       els.payslip.innerHTML = L.map(([l, v, sign]) =>
@@ -492,6 +501,16 @@
     const tx = state.tax;
     els.netPay.textContent = formatMoney(slip.net);
     els.grossPay.textContent = formatMoney(slip.gross);
+    // Stawka godzinowa netto: sama pensja zasadnicza na rękę ÷ godziny nominalne
+    const baseNet = Payroll.payslip({
+      salary: state.salary,
+      age: tx.status === "26plus" ? "26plus" : "under26",
+      kup: Number(tx.kup) || 250,
+      pit2: tx.pit2,
+      ppk: { on: tx.ppkOn, emp: tx.ppkEmp, er: tx.ppkEr },
+    }).net;
+    const nominalNow = Number(state.nominalHours) || 1;
+    document.getElementById("hourlyNet").textContent = formatMoney(roundGr(baseNet / nominalNow));
 
     const row = (label, value, cls = "") => `<div class="${cls}"><dt>${label}</dt><dd>${value}</dd></div>`;
     const minus = (label, v) => row(label, `−${formatMoney(v)}`, "minus");
