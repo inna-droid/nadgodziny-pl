@@ -125,7 +125,7 @@
   }
 
   function defaultTax() {
-    return { status: "26plus", kup: 250, pit2: true, ppkOn: false, ppkEmp: 2, ppkEr: 1.5, leaveLimit: 26 };
+    return { status: "26plus", kup: 250, pit2: true, ppkOn: false, ppkEmp: 2, ppkEr: 1.5, leaveLimit: 26, sportOn: false, sportEmp: 0, sportEr: 0, sportSrc: "firma" };
   }
 
   function saveState() {
@@ -414,6 +414,19 @@
     return { rate, amount: roundGr(rate * hours), hours };
   }
 
+  /** Karta sportowa: z ZFŚS zwolnienie do 1000 zł w roku (liczone od stycznia przy tej samej dopłacie). */
+  function sportFor(key) {
+    const tx = state.tax;
+    if (!tx.sportOn) return { emp: 0, er: 0, taxed: 0, free: 0 };
+    const er = Number(tx.sportEr) || 0, emp = Number(tx.sportEmp) || 0;
+    let free = 0;
+    if (tx.sportSrc === "zfss") {
+      const before = er * (Number(key.slice(5, 7)) - 1);
+      free = Math.min(er, Math.max(0, 1000 - before));
+    }
+    return { emp, er, free: roundGr(free), taxed: roundGr(er - free) };
+  }
+
   /** Wszystkie składniki miesiąca do listy płac (umowa o pracę). */
   function monthParams(key, premiaGross) {
     const tx = state.tax;
@@ -421,6 +434,7 @@
     const vac = vacationFor(key);
     const sick = sickFor(key);
     const info = monthInfo(key);
+    const sport = sportFor(key);
     const forceH = leaveHours(key, "half");
     const unpaidH = leaveHours(key, "none");
     const patDays = Math.min(daysInMonth(key), Number(info.paternityDays) || 0);
@@ -459,7 +473,10 @@
         kup: Number(tx.kup) || 250,
         pit2: tx.pit2,
         ppk: { on: tx.ppkOn, emp: tx.ppkEmp, er: tx.ppkEr },
+        sportTaxed: sport.taxed,
+        sportEmp: sport.emp,
       },
+      sport,
       ot, vac, sick, salaryCut, absenceCut, absencePay, forceH, unpaidH, patDays, maternity,
     };
   }
@@ -689,10 +706,12 @@
       lines.push(row("Zaliczka PIT — ulga dla młodych", formatMoney(0)));
     }
     if (tx.ppkOn) lines.push(minus(`PPK — Twoja wpłata ${pct(tx.ppkEmp)}%`, slip.ppkEmp));
+    if (slip.sportEmp) lines.push(minus("Karta MultiSport — Twoja część", slip.sportEmp));
     lines.push(row("= Na rękę (netto)", formatMoney(slip.net), "sum"));
     lines.push(row(`Koszty uzyskania przychodu`, formatMoney(slip.kup), "info"));
     lines.push(row(`Podstawa podatku`, formatMoney(slip.taxBase), "info"));
     if (tx.ppkOn) lines.push(row(`PPK — wpłata pracodawcy ${pct(tx.ppkEr)}% (na Twoje konto PPK)`, formatMoney(slip.ppkEr), "info"));
+    if (P_.sport.er) lines.push(row(P_.sport.taxed ? `Karta MultiSport — dopłata pracodawcy (doliczona do podstawy PIT${P_.sport.free ? `, ${formatMoney(P_.sport.free)} zwolnione` : ""})` : "Karta MultiSport — dopłata z ZFŚS (bez podatku)", formatMoney(P_.sport.er), "info"));
     els.payslip.innerHTML = lines.join("");
 
     const year = state.month.slice(0, 4);
@@ -783,6 +802,11 @@
     els.ppkEr.value = tx.ppkEr;
     document.getElementById("ppkEmpRow").hidden = !tx.ppkOn;
     document.getElementById("ppkErRow").hidden = !tx.ppkOn;
+    document.getElementById("sportOn").checked = tx.sportOn;
+    document.getElementById("sportEmp").value = tx.sportEmp || "";
+    document.getElementById("sportEr").value = tx.sportEr || "";
+    document.getElementById("sportSrc").value = tx.sportSrc;
+    ["sportEmpRow", "sportErRow", "sportSrcRow"].forEach((id) => (document.getElementById(id).hidden = !tx.sportOn || state.contract !== "uop"));
     els.leaveLimit.value = String(tx.leaveLimit);
   }
 
@@ -1123,7 +1147,9 @@
     L.push(["Składka zdrowotna 9%", slip.health, "−"]);
     L.push([tx.status === "26plus" ? `Zaliczka PIT 12%${tx.pit2 ? " (PIT-2)" : ""}` : "Zaliczka PIT (ulga dla młodych)", slip.pit, "−"]);
     if (tx.ppkOn) L.push([`PPK — wpłata pracownika ${pct(tx.ppkEmp)}%`, slip.ppkEmp, "−"]);
+    if (slip.sportEmp) L.push(["Karta MultiSport — część pracownika", slip.sportEmp, "−"]);
     L.push(["Do wypłaty netto", slip.net, "="]);
+    if (P_.sport.er) L.push([`Karta MultiSport — dopłata pracodawcy${P_.sport.taxed ? " (w podstawie PIT)" : " z ZFŚS (bez podatku)"}`, P_.sport.er, "i"]);
     if (tx.ppkOn) L.push([`PPK — wpłata pracodawcy ${pct(tx.ppkEr)}% (doliczona do podstawy PIT)`, slip.ppkEr, "i"]);
     return L;
   }
@@ -1405,6 +1431,10 @@
     else if (e.target === els.ppkEmp) tx.ppkEmp = Math.min(4, Math.max(0.5, Number(els.ppkEmp.value) || 2));
     else if (e.target === els.ppkEr) tx.ppkEr = Math.min(4, Math.max(1.5, Number(els.ppkEr.value) || 1.5));
     else if (e.target === els.leaveLimit) tx.leaveLimit = Number(els.leaveLimit.value);
+    else if (e.target.id === "sportOn") tx.sportOn = e.target.checked;
+    else if (e.target.id === "sportEmp") tx.sportEmp = Math.max(0, Number(e.target.value) || 0);
+    else if (e.target.id === "sportEr") tx.sportEr = Math.max(0, Number(e.target.value) || 0);
+    else if (e.target.id === "sportSrc") tx.sportSrc = e.target.value === "zfss" ? "zfss" : "firma";
     else return;
     saveState();
     render();

@@ -55,17 +55,20 @@
 
     const employment = gr(work - social + parts.sickPay); // przychód ze stosunku pracy po składkach
     const kup = employment > 0 ? Math.min(Number(p.kup) || 250, employment) : 0;
+    // karta sportowa: dopłata pracodawcy to przychód w PIT (bez ZUS przy częściowej odpłatności), część pracownika potrąca się z netto
+    const sportTaxed = gr(Number(p.sportTaxed) || 0);
+    const sportEmp = gr(Number(p.sportEmp) || 0);
     let taxBase, pit;
     if (p.age === "under26") {
       // ulga dla młodych obejmuje pracę, chorobowe od pracodawcy i zasiłek macierzyński, ale nie zasiłek chorobowy
       taxBase = Math.max(0, zl(parts.benefit));
     } else {
-      taxBase = Math.max(0, zl(employment - kup + parts.benefit + parts.maternity + ppkEr));
+      taxBase = Math.max(0, zl(employment - kup + parts.benefit + parts.maternity + ppkEr + sportTaxed));
     }
     pit = taxBase ? Math.max(0, zl(taxBase * R.pit - (p.pit2 ? R.pit2 : 0))) : 0;
 
-    const net = gr(gross - social - health - pit - ppkEmp);
-    return { ...parts, work, gross, pension, disability, sickness, social, health, kup, ppkEmp, ppkEr, taxBase, pit, net };
+    const net = gr(gross - social - health - pit - ppkEmp - sportEmp);
+    return { ...parts, work, gross, pension, disability, sickness, social, health, kup, ppkEmp, ppkEr, sportTaxed, sportEmp, taxBase, pit, net };
   }
 
   /**

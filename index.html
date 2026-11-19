@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,500;7..72,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=11" />
+  <link rel="stylesheet" href="css/styles.css?v=12" />
   <title>Twoja wypłata</title>
 </head>
 <body>
@@ -316,6 +316,25 @@
           <input type="number" id="ppkEr" min="1.5" max="4" step="0.5" inputmode="decimal" />
           <small>Wpłata pracodawcy nie zmniejsza pensji, ale zwiększa podatek.</small>
         </label>
+        <label class="check full" data-only="uop"><input type="checkbox" id="sportOn" /><span>Mam kartę MultiSport / sportową</span></label>
+        <label id="sportEmpRow">
+          <span>Karta — moja część (zł/mies.)</span>
+          <input type="number" id="sportEmp" min="0" step="0.01" inputmode="decimal" />
+          <small>Potrącana z wypłaty netto. Razem z kartą dla osoby towarzyszącej / dziecka.</small>
+        </label>
+        <label id="sportErRow">
+          <span>Karta — dopłata pracodawcy (zł/mies.)</span>
+          <input type="number" id="sportEr" min="0" step="0.01" inputmode="decimal" />
+          <small>Nie dostajesz jej do ręki, ale wchodzi do podstawy podatku.</small>
+        </label>
+        <label id="sportSrcRow">
+          <span>Skąd jest dopłata?</span>
+          <select id="sportSrc">
+            <option value="firma">Z pieniędzy firmy — tylko podatek, bez ZUS</option>
+            <option value="zfss">Z ZFŚS (fundusz socjalny) — bez podatku do 1000 zł/rok</option>
+          </select>
+          <small>Nie wiesz? Zobacz na pasku: jeśli jest pozycja „MultiSport” w przychodach — to firma.</small>
+        </label>
         <label data-only="uop">
           <span>Średnie brutto z 12 miesięcy — do L4 (zł)</span>
           <input type="number" id="sickBase" min="0" step="0.01" inputmode="decimal" placeholder="puste = pensja / średni akord" />
@@ -434,6 +453,7 @@
         <li>Na żądanie (4 dni, część wypoczynkowego), opieka nad dzieckiem do 14 lat (2 dni) i okolicznościowy: płatne jak urlop wypoczynkowy.</li>
         <li>Siła wyższa (2 dni w roku): 50% wynagrodzenia, ze składkami i podatkiem.</li>
         <li>Akord na zleceniu: sztuki × stawka; jeśli podasz godziny, a wyjdzie mniej niż 31,40 zł/h, doliczamy wyrównanie do stawki minimalnej. Na B2B akord to po prostu przychód = sztuki × stawka.</li>
+        <li>Karta MultiSport: Twoja część jest potrącana z netto; dopłata pracodawcy z firmy to przychód w PIT (bez ZUS, gdy płacisz część ceny), z ZFŚS — bez podatku do 1000 zł w roku.</li>
         <li>Urlop opiekuńczy (5 dni) i bezpłatny: pensja minus stawka godzinowa × godziny nieobecności.</li>
         <li>Urlop ojcowski (14 dni): pensja −1/30 za dzień, zasiłek macierzyński 100% z ZUS — bez składek ZUS i zdrowotnej, z podatkiem (do 26 lat bez PIT).</li>
         <li>L4: 80% (ciąża, wypadek w drodze do pracy — 100%) średniego brutto z 12 miesięcy po odjęciu 13,71%, ÷ 30 za każdy dzień. Pierwsze 33 dni w roku (po 50. roku życia — 14) płaci pracodawca, dalej zasiłek z ZUS. Pensja maleje o 1/30 za dzień L4.</li>
@@ -447,8 +467,8 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="js/holidays.js?v=11"></script>
-  <script src="js/payroll.js?v=11"></script>
-  <script src="js/app.js?v=11"></script>
+  <script src="js/holidays.js?v=12"></script>
+  <script src="js/payroll.js?v=12"></script>
+  <script src="js/app.js?v=12"></script>
 </body>
 </html>
