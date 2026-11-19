@@ -467,3 +467,176 @@ select:focus {
     transition: none !important;
   }
 }
+
+/* ---------- Eksport i wydruk ---------- */
+
+.export-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.print-report {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm 12mm;
+  }
+
+  body {
+    background: #fff !important;
+    color: #000;
+    font-size: 10.5pt;
+    line-height: 1.35;
+  }
+
+  body > *:not(.print-report) {
+    display: none !important;
+  }
+
+  .print-report {
+    display: block !important;
+    font-family: var(--font-body);
+    color: #000;
+  }
+
+  .pr-head {
+    border-bottom: 2px solid #000;
+    padding-bottom: 4mm;
+    margin-bottom: 5mm;
+  }
+
+  .pr-head h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 19pt;
+    letter-spacing: -0.01em;
+  }
+
+  .pr-sub {
+    margin: 1mm 0 0;
+    font-size: 12pt;
+    text-transform: capitalize;
+  }
+
+  .pr-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2mm 8mm;
+    margin: 0 0 6mm;
+  }
+
+  .pr-meta div {
+    display: flex;
+    justify-content: space-between;
+    gap: 4mm;
+    border-bottom: 1px dotted #999;
+    padding-bottom: 1mm;
+  }
+
+  .pr-meta dt {
+    color: #444;
+  }
+
+  .pr-meta dd {
+    margin: 0;
+    font-weight: 700;
+    text-align: right;
+  }
+
+  .pr-table,
+  .pr-summary {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .pr-table th,
+  .pr-table td {
+    border: 1px solid #888;
+    padding: 1.6mm 2mm;
+    vertical-align: top;
+    text-align: left;
+  }
+
+  .pr-table thead th {
+    background: #e9efec !important;
+    font-size: 9pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .pr-table thead {
+    display: table-header-group;
+  }
+
+  .pr-table tr {
+    break-inside: avoid;
+  }
+
+  .pr-table tfoot td {
+    font-weight: 700;
+    border-top: 2px solid #000;
+  }
+
+  .num {
+    text-align: right !important;
+    white-space: nowrap;
+  }
+
+  .pr-summary {
+    margin-top: 6mm;
+    width: auto;
+    min-width: 60%;
+    margin-left: auto;
+    break-inside: avoid;
+  }
+
+  .pr-summary th,
+  .pr-summary td {
+    padding: 1.4mm 2mm;
+    border-bottom: 1px solid #bbb;
+    text-align: left;
+    font-weight: 400;
+  }
+
+  .pr-summary .pr-grand th,
+  .pr-summary .pr-grand td {
+    font-weight: 700;
+    border-top: 2px solid #000;
+    border-bottom: none;
+  }
+
+  .pr-sign {
+    display: flex;
+    justify-content: space-between;
+    gap: 20mm;
+    margin-top: 18mm;
+    break-inside: avoid;
+  }
+
+  .pr-sign div {
+    flex: 1;
+    text-align: center;
+    font-size: 9pt;
+    color: #444;
+  }
+
+  .pr-sign span {
+    display: block;
+    border-top: 1px solid #000;
+    margin-bottom: 1.5mm;
+  }
+
+  .pr-foot {
+    margin-top: 10mm;
+    font-size: 8pt;
+    color: #555;
+  }
+
+  .pr-foot p {
+    margin: 0 0 1mm;
+  }
+}
