@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Nadgodziny PL">
+  <defs>
+    <linearGradient id="g" x1="80" y1="40" x2="440" y2="480" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1a6b5c"/>
+      <stop offset="1" stop-color="#0f3d36"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#g)"/>
+  <circle cx="256" cy="256" r="148" fill="none" stroke="#7fd6bf" stroke-width="28"/>
+  <path d="M256 140v128l78 46" fill="none" stroke="#f4fffb" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="140" r="42" fill="#c9852c"/>
+  <text x="392" y="152" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" font-weight="700" fill="#fff">+</text>
+</svg>
